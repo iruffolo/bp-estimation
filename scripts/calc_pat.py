@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import seaborn as sns
+import tqdm
 import concurrent.futures
 
 from atriumdb import AtriumSDK, DatasetDefinition
@@ -86,7 +87,7 @@ def process_ptt(itr, dev):
     dv = DataValidator()
 
     for i, w in enumerate(itr):
-        print(f"patient {w.patient_id}")
+        print(f"{i}: patient {w.patient_id}")
         if w.patient_id not in p.keys():
             p[w.patient_id] = {"pat": [], "time": []}
 
@@ -99,15 +100,10 @@ def process_ptt(itr, dev):
 
         if (dv.valid_ecg(ecg['values'], ecg_freq) and
                 dv.valid_ppg(ppg['values'])):
-            print("Valid")
-
             pat, t = calculate_pat(ecg, ecg_freq/10**9, ppg, ppg_freq/10**9)
 
             p[w.patient_id]["pat"].append(pat)
-            p[w.patient_id]["time"].append(t)
-
-        else:
-            print("Invalid window, skipping")
+            # p[w.patient_id]["time"].append(t)
 
     for pat in p.keys():
         print(f"Plotting pat {pat}")

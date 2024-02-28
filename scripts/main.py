@@ -1,13 +1,88 @@
-# import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-# from tqdm import tqdm
 from datetime import datetime
-from scipy.signal import find_peaks
+
+from threading import Thread
+from multiprocessing import Process
+import queue
 
 from atriumdb import AtriumSDK, DatasetDefinition
 
 from data_quality import DataValidator
+from ptt import calculate_ptt
+
+
+class TaskQueue(queue.Queue):
+
+    def __init__(self, num_workers=1):
+        queue.Queue.__init__(self)
+        self.num_workers = num_workers
+        self.start_workers()
+
+    def add_task(self, task, *args, **kwargs):
+        args = args or ()
+        kwargs = kwargs or {}
+        self.put((task, args, kwargs))
+
+    def start_workers(self):
+        for i in range(self.num_workers):
+            t = Thread(target=self.worker)
+            t.daemon = True
+            t.start()
+
+    def worker(self):
+        while True:
+            item, args, kwargs = self.get()
+            item(*args, **kwargs)
+            self.task_done()
+
+
+def process_window(*args):
+    """
+    Processes window of data with ABP, ECG, PPG
+
+    """
+    (window_i, window) = args
+    dv = DataValidator()
+
+    fig, ax = plt.subplots(3, figsize=(25, 15))
+    fig.suptitle(f"Patient {window.patient_id}")
+
+    valid = True
+
+    for i, ((measure_tag, measure_freq_nhz, measure_units), signal_dict) \
+            in enumerate(window.signals.items()):
+
+        print(measure_tag, measure_freq_nhz, measure_units)
+
+        freq_hz = measure_freq_nhz / 10**9
+
+        if 'ABP' in measure_tag:
+            valid, peaks = dv.valid_abp(signal_dict['values'])
+        if 'ECG' in measure_tag:
+            valid, peaks, c_peaks = dv.valid_ecg(
+                signal_dict['values'], freq_hz)
+            ax[i].plot(signal_dict['times'][c_peaks],
+                       signal_dict['values'][c_peaks], "o")
+        if 'PULS' in measure_tag:
+            valid, peaks = dv.valid_ppg(signal_dict['values'])
+
+        ax[i].plot(signal_dict['times'], signal_dict['values'])
+        ax[i].plot(signal_dict['times'][peaks],
+                   signal_dict['values'][peaks], "x")
+        ax[i].set_title(f"Measure {measure_tag}")
+        ax[i].set_xlabel("Time")
+        ax[i].set_ylabel(f"{measure_units}")
+
+    dv.print_stats(save=False)
+    plt.tight_layout()
+    if valid:
+        plt.savefig(
+            f'plots_valid/patient{window.patient_id}_{window_i}.png')
+    else:
+        plt.savefig(
+            f'plots_invalid/patient{window.patient_id}_{window_i}.png')
+    plt.close()
 
 
 def age_distribution(date_of_birth, plot=True):
@@ -36,17 +111,6 @@ def age_distribution(date_of_birth, plot=True):
         plt.savefig('age_dist.png')
 
     return age
-
-
-def get_patient_time(patients, measure):
-    """
-    For each patient, get how much data exists for the specified measure
-
-    :param patients: List of patient ids.
-    :param measure: String or id of measure.
-    """
-
-    pass
 
 
 def get_stats(sdk, measures):
@@ -81,63 +145,41 @@ def get_stats(sdk, measures):
         print(d, p, sdk.measure_device_start_time_exists(m1, d, start))
 
 
-def main(sdk, measures):
-
-    print("Building dataset")
-    gap_tolerance = 60 * (10 ** 9)  # 1 minute in nanoseconds
-    definition = DatasetDefinition.build_from_intervals(
-        sdk, "measures", measures=measures,
-        device_id_list="all", merge_strategy="intersection",
-        gap_tolerance=gap_tolerance)
-
-    print("Saving dataset")
-    definition.save("ian_example_definition.yaml", force=True)
-
-    window_size_nano = 32 * (10 ** 9)
-    print("Validating dataset")
-    iterator = sdk.get_iterator(
-        definition, window_size_nano, window_size_nano,
-        num_windows_prefetch=1_000,
-        # cached_windows_per_source=1,
-        shuffle=False)
-    print("Loading first cache")
-
-    dv = DataValidator()
+def process_ptt(itr):
+    """
+    Processing function for dataset iterator
+    """
 
     for window_i, window in enumerate(iterator):
-        print()
-        print(window.device_id, window.patient_id)
 
-        # fig, ax = plt.subplots(3, figsize=(25, 15))
-        # fig.suptitle(f"Patient {window.patient_id}")
+        ecg = [v for k, v in window.signals.items() if 'ECG' in k[0]][0]
+        ecg_freq = [k[1]
+                    for k, v in window.signals.items() if 'ECG' in k[0]][0]
+        ppg = [v for k, v in window.signals.items() if 'PULS' in k[0]][0]
+        ppg_freq = [k[1]
+                    for k, v in window.signals.items() if 'PULS' in k[0]][0]
 
-        for i, ((measure_tag, measure_freq_nhz, measure_units), signal_dict) \
-                in enumerate(window.signals.items()):
+        calculate_ptt(ecg, ecg_freq / 10 ** 9, ppg, ppg_freq / 10 ** 9)
 
-            print(measure_tag, measure_freq_nhz, measure_units)
 
-            if 'ABP' in measure_tag:
-                valid, peaks = dv.valid_abp(signal_dict['values'])
-            if 'ECG' in measure_tag:
-                valid, peaks = dv.valid_ecg(signal_dict['values'])
-            if 'PULS' in measure_tag:
-                valid, peaks = dv.valid_ppg(signal_dict['values'])
+def main(sdk, measures):
 
-            # ax[i].plot(signal_dict['times'], signal_dict['values'])
-            # ax[i].plot(signal_dict['times'][peaks],
-            #            signal_dict['values'][peaks], "x")
-            # ax[i].set_title(f"Measure {measure_tag}")
-            # ax[i].set_xlabel("Time")
-            # ax[i].set_ylabel(f"{measure_units}")
+    # q = TaskQueue(num_workers=100)
+    for window_i, window in enumerate(iterator):
 
-        # plt.tight_layout()
-        # plt.savefig(f'plots/patient{window.patient_id}_{window_i}.png')
-        # plt.close()
+        # q.add_task(process_window, window_i, window)
+        process_window(window_i, window)
 
-    dv.print_stats(save=True)
+        if window_i >= 500:
+            break
+
+    # q.join()  # block until all tasks are done
 
 
 if __name__ == "__main__":
+    # Set interactive mode off for matplotlib
+    # plt.ioff()
+
     local_dataset = "/mnt/datasets/atriumdb_abp_estimation_one_device_v2"
     sdk = AtriumSDK(dataset_location=local_dataset)
 
@@ -150,5 +192,22 @@ if __name__ == "__main__":
             'units': "MDC_DIM_DIMLESS"},
     ]
 
-    # get_stats(sdk, measures)
-    main(sdk, measures)
+    print("Building dataset")
+    gap_tolerance = 1 * (10 ** 9)  # 1 second in nanoseconds
+    definition = DatasetDefinition.build_from_intervals(
+        sdk, "measures", measures=measures,
+        device_id_list="all",
+        merge_strategy="intersection",
+        gap_tolerance=gap_tolerance)
+
+    window_size_nano = 32 * (10 ** 9)  # 32 seconds
+    print("Validating dataset")
+    iterator = sdk.get_iterator(
+        definition, window_size_nano, window_size_nano,
+        num_windows_prefetch=100,
+        # cached_windows_per_source=1,
+        shuffle=False)
+
+    print("Loading first cache")
+
+    process_ptt(iterator)

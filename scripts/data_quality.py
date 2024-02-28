@@ -1,6 +1,9 @@
 import numpy as np
 from scipy.signal import find_peaks
 
+# https://github.com/LaussenLabs/consensus_peaks
+from consensus_peaks import consensus_detect
+
 
 class DataStats:
     """
@@ -102,7 +105,7 @@ class DataValidator:
         """
 
         x = np.array(abp_window)
-        self.save_stats(x, 'abp')
+        # self.save_stats(x, 'abp')
 
         valid = (self.min_mean <= np.mean(x) <= self.max_mean and
                  self.min_max <= np.max(x) <= self.max_max and
@@ -116,7 +119,7 @@ class DataValidator:
 
         return valid, peaks
 
-    def valid_ecg(self, ecg_window, window_size=32):
+    def valid_ecg(self, ecg_window, freq, window_size=32):
         """
         Return true if the ECG passes the following checks:
             1) variance of signal must be above a small value (1e-4)
@@ -125,16 +128,19 @@ class DataValidator:
         """
 
         x = np.array(ecg_window)
-        self.save_stats(x, 'ecg')
+        # self.save_stats(x, 'ecg')
 
         peaks, _ = find_peaks(x, distance=50*4)
-        self.stats.ecg.num_peaks.append(len(peaks))
 
-        valid = (self.min_var_ecg <= np.var(x) and
+        # self.stats.ecg.num_peaks.append(len(peaks))
+
+        valid = (-5.0 <= np.min(x) <= 5 and
+                 -5.0 <= np.max(x) <= 5 and
+                 self.min_var_ecg <= np.var(x) and
                  self.min_peaks <= len(peaks)/window_size <= self.max_peaks)
-        self.stats.ecg.valid.append(valid)
+        # self.stats.ecg.valid.append(valid)
 
-        return valid, peaks
+        return valid
 
     def valid_ppg(self, ppg_window, window_size=32):
         """
@@ -145,16 +151,18 @@ class DataValidator:
         """
 
         x = np.array(ppg_window)
-        self.save_stats(x, 'ppg')
+        # self.save_stats(x, 'ppg')
 
         peaks, _ = find_peaks(x, distance=50)
-        self.stats.ppg.num_peaks.append(len(peaks))
+        # self.stats.ppg.num_peaks.append(len(peaks))
 
-        valid = (self.min_var_ecg <= np.var(x) and
+        valid = (0 <= np.min(x) <= 5000 and
+                 0 <= np.max(x) <= 5000 and
+                 self.min_var_ecg <= np.var(x) and
                  self.min_peaks <= len(peaks)/window_size <= self.max_peaks)
-        self.stats.ppg.valid.append(valid)
+        # self.stats.ppg.valid.append(valid)
 
-        return valid, peaks
+        return valid
 
     def print_stats(self, save=False):
         """

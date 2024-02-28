@@ -109,13 +109,12 @@ def process_ptt(itr, dev):
         else:
             print("Invalid window, skipping")
 
-        break
-
     for pat in p.keys():
         print(f"Plotting pat {pat}")
         df = pd.DataFrame(np.array(p[pat]["pat"]).flatten(), columns=["pat"])
 
         sns.displot(data=df, x="pat", kde=True)
+        plt.suptitle(f"Patient {pat}")
         plt.savefig(f"plots/pat/patient{pat}_{dev}")
         plt.close()
 
@@ -216,7 +215,7 @@ def process(sdk, device, window_size_nano=32*(10**9), gap_tol_nano=1*(10**9)):
 
     itr = sdk.get_iterator(definition,
                            window_size_nano, window_size_nano,
-                           num_windows_prefetch=1_000,
+                           num_windows_prefetch=3_000,
                            # cached_windows_per_source=1,
                            shuffle=False)
 
@@ -234,20 +233,26 @@ if __name__ == "__main__":
     # make_devices_dataset(sdk, measures)
     # make_patients_dataset(sdk, measures)
 
-    num_cores = 10
+    num_cores = 20
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {pp.submit(process, local_dataset, d):
-                   d for d in devices[0:4]}
+                   d for d in devices}
 
-        x = [p["pat"] for p in concurrent.futures.as_completed(futures)]
-        df = pd.concat(x)
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            dev = futures[future]
 
-        sns.displot(data=df, x="pat", kde=True)
-        plt.savefig(f"plots/pat_all")
-        plt.close()
+            x = [pats["pat"] for patient, pats in res.items()]
 
+            df = pd.concat(x)
+
+            sns.displot(data=df, x="pat", kde=True)
+            plt.suptitle(f"PAT over {len(df)} windows (Device {dev})")
+            plt.savefig(f"plots/pat_{dev}")
+
+            plt.close()
 
     # These columns are not valid in dataset (for de-identification)
     drop = ['mrn', 'first_name', 'middle_name', 'last_name',

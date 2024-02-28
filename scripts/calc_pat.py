@@ -86,35 +86,57 @@ def process_ptt(itr, dev):
     p = {}
     dv = DataValidator()
 
-    for i, w in enumerate(itr):
-        print(f"{i}: patient {w.patient_id}")
-        if w.patient_id not in p.keys():
-            p[w.patient_id] = {"pat": [], "time": []}
+    try:
+        for i, w in enumerate(itr):
+            print(f"{i}: patient {w.patient_id}")
+            if w.patient_id not in p.keys():
+                p[w.patient_id] = {"pat": [], "time": [], "abp": []}
 
-        # Extract specific signals
-        ecg = [v for k, v in w.signals.items() if 'ECG' in k[0]][0]
-        ecg_freq = [k[1] for k, v in w.signals.items() if 'ECG' in k[0]][0]
-        ppg = [v for k, v in w.signals.items() if 'PULS' in k[0]][0]
-        ppg_freq = [k[1] for k, v in w.signals.items() if 'PULS' in k[0]][0]
-        # abp = [v for k, v in w.signals.items() if 'ABP' in k[0]][0]
+            # Extract specific signals
+            ecg = [v for k, v in w.signals.items() if 'ECG' in k[0]][0]
+            ecg_freq = [k[1] for k, v in w.signals.items() if 'ECG' in k[0]][0]
+            ppg = [v for k, v in w.signals.items() if 'PULS' in k[0]][0]
+            ppg_freq = [k[1]
+                        for k, v in w.signals.items() if 'PULS' in k[0]][0]
+            abp = [v for k, v in w.signals.items() if 'ABP' in k[0]][0]
 
-        if (dv.valid_ecg(ecg['values'], ecg_freq) and
-                dv.valid_ppg(ppg['values'])):
-            pat, t = calculate_pat(ecg, ecg_freq/10**9, ppg, ppg_freq/10**9)
+            p[w.patient_id]["abp"].append(np.array(abp))
 
-            p[w.patient_id]["pat"].append(pat)
-            # p[w.patient_id]["time"].append(t)
+            if (dv.valid_ecg(ecg['values'], ecg_freq) and
+                    dv.valid_ppg(ppg['values'])):
+                pat, t = calculate_pat(
+                    ecg, ecg_freq/10**9, ppg, ppg_freq/10**9)
 
-    for pat in p.keys():
-        print(f"Plotting pat {pat}")
-        df = pd.DataFrame(np.array(p[pat]["pat"]).flatten(), columns=["pat"])
+                p[w.patient_id]["pat"].append(np.array(pat))
+                p[w.patient_id]["time"].append(np.array(t))
 
-        sns.displot(data=df, x="pat", kde=True)
-        plt.suptitle(f"Patient {pat}")
-        plt.savefig(f"plots/pat/patient{pat}_{dev}")
-        plt.close()
+            if i > 50:
+                break
 
-        p[pat]["pat"] = df
+        for pat in p.keys():
+
+            print(f"Plotting pat {pat}")
+            data = np.concatenate(p[pat]["pat"]).reshape(-1)
+            # t = np.concatenate(p[pat]["time"]).reshape(-1)
+
+            df = pd.DataFrame(data, columns=["pat"])
+
+            sns.displot(data=df, x="pat", kde=True)
+            plt.suptitle(f"Patient {pat}")
+            plt.savefig(f"plots/pat/patient{pat}_{dev}.png")
+            plt.close()
+
+            # fig, ax = plt.subplots(2, figsize=(25, 15))
+            # ax[0].plot(abp['times'], abp['values'])
+            # ax[0].set_title("ABP")
+            #
+            # ax[1].plot(ecg_peak_times, pat)
+            # ax[1].set_title("PAT")
+
+            p[pat]["pat"] = df
+
+    except Exception as e:
+        print(e)
 
     return p
 
@@ -211,9 +233,9 @@ def process(sdk, device, window_size_nano=32*(10**9), gap_tol_nano=1*(10**9)):
 
     itr = sdk.get_iterator(definition,
                            window_size_nano, window_size_nano,
-                           num_windows_prefetch=3_000,
-                           # cached_windows_per_source=1,
-                           shuffle=False)
+                           num_windows_prefetch=10,
+                           cached_windows_per_source=10,
+                           shuffle=True)
 
     return process_ptt(itr, device)
 
@@ -229,7 +251,7 @@ if __name__ == "__main__":
     # make_devices_dataset(sdk, measures)
     # make_patients_dataset(sdk, measures)
 
-    num_cores = 20
+    num_cores = 2
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 

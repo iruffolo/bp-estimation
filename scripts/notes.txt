@@ -1,2 +1,0 @@
-pdf with PTT / histogram
-individual patients on same scale (histogram)

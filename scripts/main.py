@@ -1,40 +1,16 @@
 import matplotlib.pyplot as plt
 import pandas as pd
-from datetime import datetime
-
-from threading import Thread
-from multiprocessing import Process
-import queue
+import numpy as np
+import seaborn as sns
+import tqdm
+import concurrent.futures
 
 from atriumdb import AtriumSDK, DatasetDefinition
 
 from data_quality import DataValidator
-from ptt import calculate_ptt
+from pat import calculate_pat
 
-
-class TaskQueue(queue.Queue):
-
-    def __init__(self, num_workers=1):
-        queue.Queue.__init__(self)
-        self.num_workers = num_workers
-        self.start_workers()
-
-    def add_task(self, task, *args, **kwargs):
-        args = args or ()
-        kwargs = kwargs or {}
-        self.put((task, args, kwargs))
-
-    def start_workers(self):
-        for i in range(self.num_workers):
-            t = Thread(target=self.worker)
-            t.daemon = True
-            t.start()
-
-    def worker(self):
-        while True:
-            item, args, kwargs = self.get()
-            item(*args, **kwargs)
-            self.task_done()
+from stats import age_distribution
 
 
 def process_window(*args):
@@ -85,34 +61,6 @@ def process_window(*args):
     plt.close()
 
 
-def age_distribution(date_of_birth, plot=True):
-    """
-    Converts date of birth to an integer age.
-
-    :param date_of_birth: Pandas df containing patient date of birth epoch time
-    in nanoseconds.
-    :param plot: Save a histogram plot, defaults to true.
-
-    :return: New series of ages calculate from the date of birth
-    """
-
-    age = date_of_birth.apply(
-        lambda x: (datetime.now() -
-                   datetime.fromtimestamp(x/10**9)).days/365.2425).astype(int)
-
-    # print(df.age.value_counts())
-    # df = df.drop(df[df['age'] > 30].index)
-
-    if plot:
-        age.hist(bins=age.nunique())
-        plt.title("Patient Age Distribution")
-        plt.xlabel("Age (years)")
-        plt.ylabel("Count")
-        plt.savefig('age_dist.png')
-
-    return age
-
-
 def get_stats(sdk, measures):
 
     print("Getting Stats")
@@ -121,66 +69,146 @@ def get_stats(sdk, measures):
     patients = sdk.get_all_patients()
 
     df = pd.DataFrame.from_dict(patients, orient='index')
+
+    # These columns are not valid in dataset (for de-identification)
     df = df.drop(columns=['mrn', 'first_name', 'middle_name', 'last_name',
                           'last_updated', 'first_seen', 'source_id'])
 
     # Get age distribution
-    df['age'] = age_distribution(df['dob'])
-
-    x = sdk.get_device_patient_data(patient_id_list=[46580])
-    print(x)
-
-    df = pd.DataFrame(x, columns=['dev', 'id', 'start', 'end'])
-
-    # Convert from nano to sec
-    df['end'] = df['end'] / 10**9
-    df['start'] = df['start'] / 10**9
-    df['dur'] = (df['end'] - df['start']) / 60
-
-    m1 = sdk.get_measure_id('MDC_PRESS_BLD_ART_ABP', freq=125000000000)
-
-    device_patients = sdk.get_device_patient_data(device_id_list=[80])
-
-    for (d, p, start, end) in device_patients:
-        print(d, p, sdk.measure_device_start_time_exists(m1, d, start))
+    df['age'] = age_distribution(df['dob'], plot=True)
 
 
-def process_ptt(itr):
+def process_ptt(itr, dev):
     """
     Processing function for dataset iterator
     """
 
-    for window_i, window in enumerate(iterator):
+    p = {}
+    dv = DataValidator()
 
-        ecg = [v for k, v in window.signals.items() if 'ECG' in k[0]][0]
-        ecg_freq = [k[1]
-                    for k, v in window.signals.items() if 'ECG' in k[0]][0]
-        ppg = [v for k, v in window.signals.items() if 'PULS' in k[0]][0]
+    for i, w in enumerate(itr):
+        print(f"{i}: patient {w.patient_id}")
+        if w.patient_id not in p.keys():
+            p[w.patient_id] = {"pat": [], "time": [], "abp": []}
+
+        # Extract specific signals
+        ecg = [v for k, v in w.signals.items() if 'ECG' in k[0]][0]
+        ecg_freq = [k[1] for k, v in w.signals.items() if 'ECG' in k[0]][0]
+        ppg = [v for k, v in w.signals.items() if 'PULS' in k[0]][0]
         ppg_freq = [k[1]
-                    for k, v in window.signals.items() if 'PULS' in k[0]][0]
+                    for k, v in w.signals.items() if 'PULS' in k[0]][0]
+        abp = [v for k, v in w.signals.items() if 'ABP' in k[0]][0]
 
-        calculate_ptt(ecg, ecg_freq / 10 ** 9, ppg, ppg_freq / 10 ** 9)
+        # p[w.patient_id]["abp"].append(np.array(abp))
 
+        if (dv.valid_ecg(ecg['values'], ecg_freq) and
+                dv.valid_ppg(ppg['values'])):
+            # pat, t = calculate_pat(
+            #     ecg, ecg_freq/10**9, ppg, ppg_freq/10**9)
+            #
+            # p[w.patient_id]["pat"].append(np.array(pat))
+            # p[w.patient_id]["time"].append(np.array(t))
+            np.save(f"raw_data/data_{i}.npy", w)
 
-def main(sdk, measures):
-
-    # q = TaskQueue(num_workers=100)
-    for window_i, window in enumerate(iterator):
-
-        # q.add_task(process_window, window_i, window)
-        process_window(window_i, window)
-
-        if window_i >= 500:
+        if i > 10:
             break
 
-    # q.join()  # block until all tasks are done
+    for pat in p.keys():
+
+        print(f"Plotting pat {pat}")
+        data = np.concatenate(p[pat]["pat"]).reshape(-1)
+        # t = np.concatenate(p[pat]["time"]).reshape(-1)
+
+        df = pd.DataFrame(data, columns=["pat"])
+
+        sns.displot(data=df, x="pat", kde=True)
+        plt.suptitle(f"Patient {pat}")
+        plt.savefig(f"plots/pat/patient{pat}_{dev}.png")
+        plt.close()
+
+        # fig, ax = plt.subplots(2, figsize=(25, 15))
+        # ax[0].plot(abp['times'], abp['values'])
+        # ax[0].set_title("ABP")
+        #
+        # ax[1].plot(ecg_peak_times, pat)
+        # ax[1].set_title("PAT")
+
+        p[pat]["pat"] = df
+
+    return p
 
 
-if __name__ == "__main__":
-    # Set interactive mode off for matplotlib
-    # plt.ioff()
+def make_patients_dataset(sdk, meas, gap_tol_s=1,
+                          pats_per_ds=100, path="datasets/patients"):
+    """
+    Creates multiple DatasetDefinitions by patient and saves them to folder,
+    for faster loading.
 
-    local_dataset = "/mnt/datasets/atriumdb_abp_estimation_one_device_v2"
+    :param sdk: AtriumDB sdk.
+    :param meas: List of measures to use in the Dataset.
+    :param gap_tol_s: Gap tolerance (missing data) allowed, in seconds.
+    :param pats_per_ds: Number of patients to include in each Dataset.
+    :param path: Path to folder to save Datasets.
+
+    :return: None
+    """
+
+    patients = sdk.get_all_patients()
+    ids = {k: 'all' for k in patients.keys()}
+
+    gap_tol_ns = gap_tol_s * (10 ** 9)
+
+    for i in range(0, len(patients), pats_per_ds):
+
+        p = {k: ids[k] for k in list(ids)[i:i+pats_per_ds]}
+
+        print(f"Building dataset, patients: {i}:{i+pats_per_ds}")
+
+        definition = DatasetDefinition.build_from_intervals(
+            sdk, "measures", measures=meas,
+            patient_id_list=p,
+            # device_id_list="all",
+            merge_strategy="intersection",
+            gap_tolerance=gap_tol_ns)
+
+        definition.save(f"{path}/pats_{i}_{i+pats_per_ds}.yaml", force=True)
+
+
+def make_devices_dataset(sdk, meas, gap_tol_s=1, path="datasets/devices"):
+    """
+    Creates multiple DatasetDefinitions by device and saves them to folder,
+    for faster loading.
+
+    :param sdk: AtriumDB sdk.
+    :param meas: List of measures to use in the Dataset.
+    :param gap_tol_s: Gap tolerance (missing data) allowed, in seconds.
+    :param path: Path to folder to save Datasets.
+
+    :return: None
+    """
+
+    devices = sdk.get_all_devices()
+
+    gap_tol_ns = gap_tol_s * (10 ** 9)
+
+    for dev in devices:
+
+        print(f"Building dataset, device: {dev}")
+
+        definition = DatasetDefinition.build_from_intervals(
+            sdk, "measures", measures=meas,
+            device_id_list={dev: "all"},
+            merge_strategy="intersection",
+            gap_tolerance=gap_tol_ns)
+
+        definition.save(f"{path}/dev_{dev}.yaml", force=True)
+
+
+def process(sdk, device, window_size_nano=60*(10**9), gap_tol_nano=1*(10**9)):
+    """
+    Creates new SDK instance and iterator for device
+    """
+
     sdk = AtriumSDK(dataset_location=local_dataset)
 
     measures = [
@@ -192,22 +220,57 @@ if __name__ == "__main__":
             'units': "MDC_DIM_DIMLESS"},
     ]
 
-    print("Building dataset")
-    gap_tolerance = 1 * (10 ** 9)  # 1 second in nanoseconds
+    print(f"Building dataset, device: {device}")
+
     definition = DatasetDefinition.build_from_intervals(
         sdk, "measures", measures=measures,
-        device_id_list="all",
+        device_id_list={device: "all"},
         merge_strategy="intersection",
-        gap_tolerance=gap_tolerance)
+        gap_tolerance=gap_tol_nano)
 
-    window_size_nano = 32 * (10 ** 9)  # 32 seconds
-    print("Validating dataset")
-    iterator = sdk.get_iterator(
-        definition, window_size_nano, window_size_nano,
-        num_windows_prefetch=100,
-        # cached_windows_per_source=1,
-        shuffle=False)
+    itr = sdk.get_iterator(definition,
+                           window_size_nano, window_size_nano,
+                           num_windows_prefetch=10,
+                           cached_windows_per_source=10,
+                           shuffle=True)
 
-    print("Loading first cache")
+    return process_ptt(itr, device)
 
-    process_ptt(iterator)
+
+if __name__ == "__main__":
+
+    local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
+
+    sdk = AtriumSDK(dataset_location=local_dataset)
+
+    devices = list(sdk.get_all_devices().keys())
+
+    # make_devices_dataset(sdk, measures)
+    # make_patients_dataset(sdk, measures)
+
+    num_cores = 2
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
+
+        futures = {pp.submit(process, local_dataset, 74): 74}
+                   # d for d in devices}
+
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            dev = futures[future]
+
+            x = [pats["pat"] for patient, pats in res.items()]
+
+            df = pd.concat(x)
+
+            sns.displot(data=df, x="pat", kde=True)
+            plt.suptitle(f"PAT over {len(df)} windows (Device {dev})")
+            plt.savefig(f"plots/pat_{dev}")
+
+            plt.close()
+
+    # These columns are not valid in dataset (for de-identification)
+    drop = ['mrn', 'first_name', 'middle_name', 'last_name',
+            'last_updated', 'first_seen', 'source_id',
+            'height', 'weight'
+            ]

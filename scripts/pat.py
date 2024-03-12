@@ -4,6 +4,9 @@ import heartpy as hp
 from scipy.spatial import distance
 # https://github.com/LaussenLabs/consensus_peaks
 from consensus_peaks import consensus_detect
+import neurokit2 as nk
+from biosppy.signals import ecg
+from biosppy.signals.ppg import find_onsets_kavsaoglu2016 as ppg_onsets
 
 
 def _get_ppg_peaks(signal, freq):
@@ -13,10 +16,36 @@ def _get_ppg_peaks(signal, freq):
 
     # signal = hp.filter_signal(signal, sample_rate=freq,
                               # cutoff=40, order=2, filtertype='lowpass')
+    # working_data, measures = hp.process(signal, freq)
 
-    working_data, measures = hp.process(signal, freq)
+    onsets, _ = find_onsets_kavsaoglu2016(signal=signal, sampling_rate=freq, 
+                              init_bpm=90, min_delay=0.6, max_BPM=250)
 
-    return working_data['peaklist']
+    return onsets
+
+
+def neurokit_rpeak_detect_fast(signal_times, signal_values, freq_hz):
+    """
+    Detect R-peaks using NeuroKit2
+
+    :param signal_times: Times of signal
+    :param signal_values: Values of signal
+    :param freq_hz: Frequency of signal
+    """
+
+    assert signal_times.size == signal_values.size
+    try:
+        clean_signal = nk.ecg_clean(signal_values, sampling_rate=int(freq_hz))
+        signals, info = nk.ecg_peaks(clean_signal, sampling_rate=int(freq_hz))
+    except Exception as e:
+        print(f"Error: {e}")
+
+    peak_indices = info["ECG_R_Peaks"]
+    # Correct Peaks
+    (corrected_peak_indices,) = ecg.correct_rpeaks(
+        signal=signal_values, rpeaks=peak_indices, sampling_rate=freq_hz)
+
+    return signal_times[corrected_peak_indices]
 
 
 def _get_ecg_peaks(signal, freq):
@@ -45,6 +74,7 @@ def closest_argmin(x, y):
 
 def get_ecg_signature(ecg, ecg_freq, ppg, ppg_freq, size=10):
 
+    ecg_peaks = neurokit_rpeak_detect_fast(ecg['times'], ecg['values'], freq) / 10**9
     ecg_peaks = _get_ecg_peaks(ecg['values'][0:50000], ecg_freq)
     ecg_times = ecg['times'][ecg_peaks]
     ecg_diffs = [np.roll(ecg_times, -i) - ecg_times for i in range(size)]
@@ -120,44 +150,57 @@ def calculate_pat(ecg, ecg_freq, ppg, ppg_freq):
     return pat, ecg_peak_times
 
 
-def shift_times(times, scale=10**9):
 
-    times = times - times[0]
+def rpeak_dist(ecg, freq):
 
-    return times / scale
+    peaks = neurokit_rpeak_detect_fast(ecg['times'], ecg['values'], freq) / 10**9
+    # print(peaks)
+
+    diff = np.diff(peaks)
+
+    plt.hist(diff, bins=100)
+    plt.title("R-Peak IBI Distribution")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency")
+    plt.show()
+    plt.savefig("plots/rpeak_ibi_dist")
+
+    return diff
+
 
 if __name__ == "__main__":
 
-    print("PTT")
+    print("Calculating PAT...")
 
-    # for i in range(10):
     w = np.load("raw_data/data_0_hourly.npy", allow_pickle=True).item()
 
-    ecg = [v for k, v in w.signals.items() if 'ECG' in k[0]][0]
-    ecg_freq = [k[1] for k, v in w.signals.items() if 'ECG' in k[0]][0] / 10**9
-    ppg = [v for k, v in w.signals.items() if 'PULS' in k[0]][0]
-    ppg_freq = [k[1]
-                for k, v in w.signals.items() if 'PULS' in k[0]][0] / 10**9
-    # abp = [v for k, v in w.signals.items() if 'ABP' in k[0]][0]
+    ecg_data, ecg_freq = [(v, k[1]/10**9) for
+                          k, v in w.signals.items() if 'ECG' in k[0]][0]
+    ppg_data, ppg_freq = [(v, k[1]/10**9) for
+                          k, v in w.signals.items() if 'PULS' in k[0]][0]
+
+    rp = rpeak_dist(ecg_data, ecg_freq)
+    exit()
 
     ecg_peaks, ppg_peaks, match = get_ecg_signature(
-        ecg, ecg_freq, ppg, ppg_freq)
+        ecg, ecg_freq, ppg_data, ppg_freq)
+
+    def shift_times(times, scale=10**9):
+        times = times - times[0]
+        return times / scale
 
     if True:
         fig, ax = plt.subplots(3, figsize=(25, 20))
 
-        ax[0].plot(shift_times(ecg['times']), ecg['values'])
-        ax[0].plot(ecg['times'],
-                   hp.filter_signal(ecg['values'], sample_rate=ecg_freq,
-                                    cutoff=20, order=2, filtertype='lowpass'))
-        ax[0].plot(shift_times(ecg['times'][ecg_peaks]),
-                   ecg['values'][ecg_peaks], "x")
+        ax[0].plot(shift_times(ecg_data['times']), ecg_data['values'])
+        ax[0].plot(shift_times(ecg_data['times'][ecg_peaks]),
+                   ecg_data['values'][ecg_peaks], "x")
 
-        ax[1].plot(shift_times(ppg['times']), ppg['values'])
-        ax[1].plot(shift_times(ppg['times'][ppg_peaks]),
-                   ppg['values'][ppg_peaks], "x")
+        ax[1].plot(shift_times(ppg_data['times']), ppg_data['values'])
+        ax[1].plot(shift_times(ppg_data['times'][ppg_peaks]),
+                   ppg_data['values'][ppg_peaks], "x")
 
-        ax[2].plot(shift_times(ecg['times'][ecg_peaks]), match)
+        ax[2].plot(shift_times(ecg_data['times'][ecg_peaks]), match)
 
         plt.show()
         # plt.savefig(f"plots/pat_{i}")

@@ -217,7 +217,8 @@ def plot_pat(ecg_data, ecg_peaks, ppg_data, ppg_peaks,
     plt.close()
 
 
-def plot_pat_hist(pats, patient_id=0, device_id=0, show=True, save=True):
+def plot_pat_hist(pats, patient_id=0, device_id=0,
+                  show=True, save=True):
     """
     Plot PAT histogram
 

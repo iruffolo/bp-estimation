@@ -20,13 +20,9 @@ def process_pat(itr, dev):
     """
 
     p = {}
-    dv = DataValidator()
+    # dv = DataValidator()
 
     for i, w in enumerate(itr):
-        print(f"Window {i}: Patient {w.patient_id}")
-
-        if w.patient_id not in p.keys():
-            p[w.patient_id] = {"pat": [], "time": []}
 
         # Extract specific signals
         ecg_data, ecg_freq = [(v, k[1]/10**9) for
@@ -37,8 +33,13 @@ def process_pat(itr, dev):
         ecg_data['times'] = ecg_data['times'] / 10**9
         ppg_data['times'] = ppg_data['times'] / 10**9
 
-        ecg_peaks, ppg_peaks, idx_ecg, idx_ppg, m_peaks, pats = align_peaks(
-            ecg_data, ecg_freq, ppg_data, ppg_freq)
+        try:
+            ecg_peaks, ppg_peaks, idx_ecg, idx_ppg, m_peaks, pats = align_peaks(
+                ecg_data, ecg_freq, ppg_data, ppg_freq)
+        except Exception as e:
+            # Skip to next window if error extracting PATs
+            print(f"Error: {e}")
+            continue
 
         plot_pat(ecg_data, ecg_peaks, ppg_data, ppg_peaks,
                  idx_ecg, idx_ppg, m_peaks, pats,
@@ -52,12 +53,18 @@ def process_pat(itr, dev):
         # if (dv.valid_ecg(ecg['values'], ecg_freq) and
         #         dv.valid_ppg(ppg['values'])):
 
+        if w.patient_id not in p.keys():
+            p[w.patient_id] = {"pat": [], "time": []}
+
         p[w.patient_id]["pat"].append(np.array(pats))
         p[w.patient_id]["time"].append(np.array(ecg_data['times']))
 
         # np.save(f"raw_data/data_{i}_hourly.npy", w)
-        if i > 2:
-            break
+
+    # Flatten all the patient data
+    for k, v in p.items():
+        p[k]["pat"] = np.concatenate(v["pat"])
+        p[k]["time"] = np.concatenate(v["time"])
 
     return p
 
@@ -96,9 +103,9 @@ def process(dataset_location, device,
 
     itr = sdk.get_iterator(definition,
                            window_size_nano, window_size_nano,
-                           num_windows_prefetch=1,
-                           cached_windows_per_source=1,
-                           shuffle=True)
+                           num_windows_prefetch=10,
+                           # cached_windows_per_source=1,
+                           shuffle=False)
 
     return process_pat(itr, device)
 
@@ -106,37 +113,39 @@ def process(dataset_location, device,
 if __name__ == "__main__":
 
     local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
-    num_cores = 2
+    num_cores = 10
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    pat = process(local_dataset, 97)
-    print(pat)
-
-    exit()
-
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
-        futures = {pp.submit(process, local_dataset, 74): 74}
-                   # d for d in devices}
+        futures = {pp.submit(process, local_dataset, d):
+                   d for d in devices}
 
-        for future in concurrent.futures.as_completed(futures):
-            res = future.result()
-            dev = futures[future]
-            print(f"Device {dev} done")
-            print(res)
+        results = [f.result() for
+                   f in concurrent.futures.as_completed(futures)]
 
-            # x = [pats["pat"] for patient, pats in res.items()]
-            #
-            # df = pd.concat(x)
-            #
-            # sns.displot(data=df, x="pat", kde=True)
-            # plt.suptitle(f"PAT over {len(df)} windows (Device {dev})")
-            # plt.savefig(f"plots/pat_{dev}")
-            #
-            # plt.close()
+        np.save("raw_data/results.npy", results)
+        print(f"Results len {len(results)}")
+
+        pats = np.concatenate([v["pat"] for r in results for k, v in r.items()])
+        clean_pats = pats[(pats > 0) & (pats < 3)]
+
+        sns.displot(pats, bins=1000, kde=True)
+        plt.suptitle(f"PAT over {len(results)} windows")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Frequency")
+        plt.savefig("plots/pat_all_dist")
+
+        sns.displot(clean_pats, bins=1000, kde=True)
+        plt.suptitle(f"PAT over {len(results)} windows")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Frequency")
+        plt.savefig("plots/pat_all_dist_clean")
+
+    print("Finished processing")
 
     # These columns are not valid in dataset (for de-identification)
     drop = ['mrn', 'first_name', 'middle_name', 'last_name',

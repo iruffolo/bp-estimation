@@ -1,14 +1,15 @@
 import numpy as np
-from scipy.signal import find_peaks
 
 # https://github.com/LaussenLabs/consensus_peaks
-from consensus_peaks import consensus_detect
+# from consensus_peaks import consensus_detect
+from scipy.signal import find_peaks
 
 
 class DataStats:
     """
     POD dataclass
     """
+
     class Stats:
         def __init__(self):
             self.mean = list()
@@ -41,11 +42,7 @@ class DataStats:
         self.ppg = self.Stats()
 
     def __str__(self):
-        return (
-            f"ABP: {self.abp}\n"
-            f"ECG: {self.ecg}\n"
-            f"PPG: {self.ppg}"
-        )
+        return f"ABP: {self.abp}\n" f"ECG: {self.ecg}\n" f"PPG: {self.ppg}"
 
 
 class DataValidator:
@@ -72,11 +69,11 @@ class DataValidator:
         Records the mean, std, var, max, min of signal
         """
 
-        if signal == 'abp':
+        if signal == "abp":
             stats = self.stats.abp
-        elif signal == 'ecg':
+        elif signal == "ecg":
             stats = self.stats.ecg
-        elif signal == 'ppg':
+        elif signal == "ppg":
             stats = self.stats.ppg
         else:
             stats = DataStats().abp
@@ -107,10 +104,12 @@ class DataValidator:
         x = np.array(abp_window)
         # self.save_stats(x, 'abp')
 
-        valid = (self.min_mean <= np.mean(x) <= self.max_mean and
-                 self.min_max <= np.max(x) <= self.max_max and
-                 np.min(x) >= self.min_min and
-                 self.min_var <= np.var(x))
+        valid = (
+            self.min_mean <= np.mean(x) <= self.max_mean
+            and self.min_max <= np.max(x) <= self.max_max
+            and np.min(x) >= self.min_min
+            and self.min_var <= np.var(x)
+        )
 
         self.stats.abp.valid.append(valid)
 
@@ -130,14 +129,16 @@ class DataValidator:
         x = np.array(ecg_window)
         # self.save_stats(x, 'ecg')
 
-        peaks, _ = find_peaks(x, distance=50*4)
+        peaks, _ = find_peaks(x, distance=50 * 4)
 
         # self.stats.ecg.num_peaks.append(len(peaks))
 
-        valid = (-5.0 <= np.min(x) <= 5 and
-                 -5.0 <= np.max(x) <= 5 and
-                 self.min_var_ecg <= np.var(x) and
-                 self.min_peaks <= len(peaks)/window_size <= self.max_peaks)
+        valid = (
+            -5.0 <= np.min(x) <= 5
+            and -5.0 <= np.max(x) <= 5
+            and self.min_var_ecg <= np.var(x)
+            and self.min_peaks <= len(peaks) / window_size <= self.max_peaks
+        )
         # self.stats.ecg.valid.append(valid)
 
         return valid
@@ -156,10 +157,12 @@ class DataValidator:
         peaks, _ = find_peaks(x, distance=50)
         # self.stats.ppg.num_peaks.append(len(peaks))
 
-        valid = (0 <= np.min(x) <= 5000 and
-                 0 <= np.max(x) <= 5000 and
-                 self.min_var_ecg <= np.var(x) and
-                 self.min_peaks <= len(peaks)/window_size <= self.max_peaks)
+        valid = (
+            0 <= np.min(x) <= 5000
+            and 0 <= np.max(x) <= 5000
+            and self.min_var_ecg <= np.var(x)
+            and self.min_peaks <= len(peaks) / window_size <= self.max_peaks
+        )
         # self.stats.ppg.valid.append(valid)
 
         return valid

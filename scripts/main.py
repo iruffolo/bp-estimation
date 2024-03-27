@@ -1,9 +1,9 @@
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import seaborn as sns
 import concurrent.futures
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
 from data_quality import DataValidator
 from pat import align_peaks, plot_pat, plot_pat_hist
@@ -23,31 +23,55 @@ def process_pat(itr, dev):
     # dv = DataValidator()
 
     for i, w in enumerate(itr):
+        print(f"Processing window {i}... Patient {w.patient_id}")
 
         # Extract specific signals
-        ecg_data, ecg_freq = [(v, k[1]/10**9) for
-                              k, v in w.signals.items() if 'ECG' in k[0]][0]
-        ppg_data, ppg_freq = [(v, k[1]/10**9) for
-                              k, v in w.signals.items() if 'PULS' in k[0]][0]
+        ecg_data, ecg_freq = [
+            (v, k[1] / 10**9) for k, v in w.signals.items() if "ECG" in k[0]
+        ][0]
+        ppg_data, ppg_freq = [
+            (v, k[1] / 10**9) for k, v in w.signals.items() if "PULS" in k[0]
+        ][0]
 
-        ecg_data['times'] = ecg_data['times'] / 10**9
-        ppg_data['times'] = ppg_data['times'] / 10**9
+        print("Any NaNs?")
+        print(np.isnan(ecg_data["values"]).any())
+        print(np.isnan(ppg_data["values"]).any())
+
+        print(np.sum(np.isnan(ecg_data["values"])))
+        print(np.sum(np.isnan(ppg_data["values"])))
+
+        continue
+
+        ecg_data["times"] = ecg_data["times"] / 10**9
+        ppg_data["times"] = ppg_data["times"] / 10**9
 
         try:
             ecg_peaks, ppg_peaks, idx_ecg, idx_ppg, m_peaks, pats = align_peaks(
-                ecg_data, ecg_freq, ppg_data, ppg_freq)
+                ecg_data, ecg_freq, ppg_data, ppg_freq
+            )
         except Exception as e:
             # Skip to next window if error extracting PATs
             print(f"Error: {e}")
-            continue
 
-        plot_pat(ecg_data, ecg_peaks, ppg_data, ppg_peaks,
-                 idx_ecg, idx_ppg, m_peaks, pats,
-                 patient_id=w.patient_id, device_id=dev, show=False, save=True)
+        plot_pat(
+            ecg_data,
+            ecg_peaks,
+            ppg_data,
+            ppg_peaks,
+            idx_ecg,
+            idx_ppg,
+            m_peaks,
+            pats,
+            patient_id=w.patient_id,
+            device_id=dev,
+            show=False,
+            save=True,
+        )
 
         clean_pats = pats[(pats > 0) & (pats < 3)]
-        plot_pat_hist(clean_pats, patient_id=w.patient_id, device_id=dev,
-                      show=False, save=True)
+        plot_pat_hist(
+            clean_pats, patient_id=w.patient_id, device_id=dev, show=False, save=True
+        )
 
         # Only process if signals are valid
         # if (dv.valid_ecg(ecg['values'], ecg_freq) and
@@ -57,7 +81,10 @@ def process_pat(itr, dev):
             p[w.patient_id] = {"pat": [], "time": []}
 
         p[w.patient_id]["pat"].append(np.array(pats))
-        p[w.patient_id]["time"].append(np.array(ecg_data['times']))
+        p[w.patient_id]["time"].append(np.array(ecg_data["times"]))
+
+        if i > 1:
+            break
 
         # np.save(f"raw_data/data_{i}_hourly.npy", w)
 
@@ -69,8 +96,9 @@ def process_pat(itr, dev):
     return p
 
 
-def process(dataset_location, device,
-            window_size_nano=3600*(10**9), gap_tol_nano=1*(10**9)):
+def process(
+    dataset_location, device, window_size_nano=30 * (10**9), gap_tol_nano=1 * (10**9)
+):
     """
     Creates new SDK instance and iterator for device
 
@@ -85,27 +113,42 @@ def process(dataset_location, device,
     sdk = AtriumSDK(dataset_location=dataset_location)
 
     measures = [
-        {'tag': "MDC_PRESS_BLD_ART_ABP",
-            'freq_nhz': 125_000_000_000, 'units': "MDC_DIM_MMHG"},
-        {'tag': "MDC_ECG_ELEC_POTL_II", 'freq_nhz': 500_000_000_000,
-            'units': "MDC_DIM_MILLI_VOLT"},
-        {'tag': "MDC_PULS_OXIM_PLETH", 'freq_nhz': 125_000_000_000,
-            'units': "MDC_DIM_DIMLESS"},
+        {
+            "tag": "MDC_PRESS_BLD_ART_ABP",
+            "freq_nhz": 125_000_000_000,
+            "units": "MDC_DIM_MMHG",
+        },
+        {
+            "tag": "MDC_ECG_ELEC_POTL_II",
+            "freq_nhz": 500_000_000_000,
+            "units": "MDC_DIM_MILLI_VOLT",
+        },
+        {
+            "tag": "MDC_PULS_OXIM_PLETH",
+            "freq_nhz": 125_000_000_000,
+            "units": "MDC_DIM_DIMLESS",
+        },
     ]
 
     print(f"Building dataset, device: {device}")
 
     definition = DatasetDefinition.build_from_intervals(
-        sdk, "measures", measures=measures,
+        sdk,
+        "measures",
+        measures=measures,
         device_id_list={device: "all"},
         merge_strategy="intersection",
-        gap_tolerance=gap_tol_nano)
+        gap_tolerance=gap_tol_nano,
+    )
 
-    itr = sdk.get_iterator(definition,
-                           window_size_nano, window_size_nano,
-                           num_windows_prefetch=10,
-                           # cached_windows_per_source=1,
-                           shuffle=False)
+    itr = sdk.get_iterator(
+        definition,
+        window_size_nano,
+        window_size_nano,
+        num_windows_prefetch=10,
+        # cached_windows_per_source=1,
+        shuffle=False,
+    )
 
     return process_pat(itr, device)
 
@@ -113,24 +156,32 @@ def process(dataset_location, device,
 if __name__ == "__main__":
 
     local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
-    num_cores = 10
+    num_cores = 40
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
+    process(local_dataset, devices[0])
+    exit()
+
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
-        futures = {pp.submit(process, local_dataset, d):
-                   d for d in devices}
+        futures = {pp.submit(process, local_dataset, d): d for d in devices}
 
-        results = [f.result() for
-                   f in concurrent.futures.as_completed(futures)]
+        results = list()
+
+        for f in concurrent.futures.as_completed(futures):
+            print(f"Finished processing {futures[f]}")
+            try:
+                results.append(f.result())
+            except Exception as e:
+                print(f"Error in results: {e}")
 
         np.save("raw_data/results.npy", results)
         print(f"Results len {len(results)}")
 
-        pats = np.concatenate([v["pat"] for r in results for k, v in r.items()])
+        pats = np.concatenate([v["pat"] for r in results for _, v in r.items()])
         clean_pats = pats[(pats > 0) & (pats < 3)]
 
         sns.displot(pats, bins=1000, kde=True)
@@ -148,7 +199,14 @@ if __name__ == "__main__":
     print("Finished processing")
 
     # These columns are not valid in dataset (for de-identification)
-    drop = ['mrn', 'first_name', 'middle_name', 'last_name',
-            'last_updated', 'first_seen', 'source_id',
-            'height', 'weight'
-            ]
+    drop = [
+        "mrn",
+        "first_name",
+        "middle_name",
+        "last_name",
+        "last_updated",
+        "first_seen",
+        "source_id",
+        "height",
+        "weight",
+    ]

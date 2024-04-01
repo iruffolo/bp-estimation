@@ -5,8 +5,10 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
+
 from data_quality import DataValidator
-from pat import align_peaks, plot_pat, plot_pat_hist
+from pat import align_peaks
+from plotting import plot_pat, plot_pat_hist
 
 
 def process_pat(itr, dev):
@@ -33,49 +35,38 @@ def process_pat(itr, dev):
             (v, k[1] / 10**9) for k, v in w.signals.items() if "PULS" in k[0]
         ][0]
 
-        print("Any NaNs?")
-        print(np.isnan(ecg_data["values"]).any())
-        print(np.isnan(ppg_data["values"]).any())
-
-        print(np.sum(np.isnan(ecg_data["values"])))
-        print(np.sum(np.isnan(ppg_data["values"])))
-
-        continue
+        if (np.isnan(ecg_data["values"]).any()) or (np.isnan(ppg_data["values"]).any()):
+            print("Skipping window due to NaNs")
+            continue
 
         ecg_data["times"] = ecg_data["times"] / 10**9
         ppg_data["times"] = ppg_data["times"] / 10**9
 
-        try:
-            ecg_peaks, ppg_peaks, idx_ecg, idx_ppg, m_peaks, pats = align_peaks(
-                ecg_data, ecg_freq, ppg_data, ppg_freq
-            )
-        except Exception as e:
-            # Skip to next window if error extracting PATs
-            print(f"Error: {e}")
-
-        plot_pat(
-            ecg_data,
-            ecg_peaks,
-            ppg_data,
-            ppg_peaks,
-            idx_ecg,
-            idx_ppg,
-            m_peaks,
-            pats,
-            patient_id=w.patient_id,
-            device_id=dev,
-            show=False,
-            save=True,
+        ecg_peaks, ppg_peaks, idx_ecg, idx_ppg, m_peaks, pats, hr = align_peaks(
+            ecg_data, ecg_freq, ppg_data, ppg_freq
         )
 
-        clean_pats = pats[(pats > 0) & (pats < 3)]
-        plot_pat_hist(
-            clean_pats, patient_id=w.patient_id, device_id=dev, show=False, save=True
-        )
-
-        # Only process if signals are valid
-        # if (dv.valid_ecg(ecg['values'], ecg_freq) and
-        #         dv.valid_ppg(ppg['values'])):
+        # print(pats)
+        # plot_pat(
+        #     ecg_data,
+        #     ecg_peaks,
+        #     ppg_data,
+        #     ppg_peaks,
+        #     idx_ecg,
+        #     idx_ppg,
+        #     m_peaks,
+        #     pats,
+        #     hr,
+        #     patient_id=w.patient_id,
+        #     device_id=dev,
+        #     show=True,
+        #     save=True,
+        # )
+        #
+        # clean_pats = pats[(pats > 0) & (pats < 3)]
+        # plot_pat_hist(
+        #     clean_pats, patient_id=w.patient_id, device_id=dev, show=False, save=True
+        # )
 
         if w.patient_id not in p.keys():
             p[w.patient_id] = {"pat": [], "time": []}
@@ -83,7 +74,7 @@ def process_pat(itr, dev):
         p[w.patient_id]["pat"].append(np.array(pats))
         p[w.patient_id]["time"].append(np.array(ecg_data["times"]))
 
-        if i > 1:
+        if i > 500:
             break
 
         # np.save(f"raw_data/data_{i}_hourly.npy", w)
@@ -97,7 +88,10 @@ def process_pat(itr, dev):
 
 
 def process(
-    dataset_location, device, window_size_nano=30 * (10**9), gap_tol_nano=1 * (10**9)
+    dataset_location,
+    device,
+    window_size_nano=60 * 10 * (10**9),
+    gap_tol_nano=0.5 * (10**9),
 ):
     """
     Creates new SDK instance and iterator for device
@@ -145,7 +139,7 @@ def process(
         definition,
         window_size_nano,
         window_size_nano,
-        num_windows_prefetch=10,
+        num_windows_prefetch=100,
         # cached_windows_per_source=1,
         shuffle=False,
     )
@@ -162,12 +156,10 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    process(local_dataset, devices[0])
-    exit()
-
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {pp.submit(process, local_dataset, d): d for d in devices}
+        # futures = {pp.submit(process, local_dataset, 74): 74}
 
         results = list()
 
@@ -178,35 +170,23 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error in results: {e}")
 
-        np.save("raw_data/results.npy", results)
+        # np.save("raw_data/results.npy", results)
         print(f"Results len {len(results)}")
 
         pats = np.concatenate([v["pat"] for r in results for _, v in r.items()])
+        print(f"N pats: {len(pats)}")
         clean_pats = pats[(pats > 0) & (pats < 3)]
 
-        sns.displot(pats, bins=1000, kde=True)
+        sns.displot(pats, bins=100)
         plt.suptitle(f"PAT over {len(results)} windows")
         plt.xlabel("Time (s)")
         plt.ylabel("Frequency")
         plt.savefig("plots/pat_all_dist")
 
-        sns.displot(clean_pats, bins=1000, kde=True)
+        sns.displot(clean_pats, bins=100)
         plt.suptitle(f"PAT over {len(results)} windows")
         plt.xlabel("Time (s)")
         plt.ylabel("Frequency")
         plt.savefig("plots/pat_all_dist_clean")
 
     print("Finished processing")
-
-    # These columns are not valid in dataset (for de-identification)
-    drop = [
-        "mrn",
-        "first_name",
-        "middle_name",
-        "last_name",
-        "last_updated",
-        "first_seen",
-        "source_id",
-        "height",
-        "weight",
-    ]

@@ -25,14 +25,10 @@ def rpeak_dist(ecg_peaks, freq):
 
 def plot_pat(
     ecg_data,
-    ecg_peaks,
+    ecg_peak_times,
     ppg_data,
-    ppg_peaks,
-    idx_ecg,
-    idx_ppg,
-    m_peaks,
+    ppg_peak_times,
     pats,
-    hr,
     show=True,
     save=True,
     patient_id=0,
@@ -42,60 +38,42 @@ def plot_pat(
     Plot PAT
 
     :param ecg_data: ECG signal
-    :param ecg_peaks: ECG peaks
+    :param ecg_peak_times: ECG peaks
     :param ppg_data: PPG signal
-    :param ppg_peaks: PPG peaks
-    :param idx_ecg: ECG peak indices
-    :param idx_ppg: PPG peak indices
-    :param m_peaks: Matching peaks
+    :param ppg_peak_times: PPG peaks
     :param pats: PAT
     """
 
     # Find indicies from values of times
-    # np.nonzero(np.in1d(A,B))[0]
+    idx_ecg = np.nonzero(np.in1d(ecg_data["times"], ecg_peak_times))[0]
+    idx_ppg = np.nonzero(np.in1d(ppg_data["times"], ppg_peak_times))[0]
 
-    num_plots = 7
-    fig, ax = plt.subplots(num_plots, figsize=(25, 20))
+    num_plots = 3
+    fig, ax = plt.subplots(num_plots, figsize=(15, 10))
 
     # Share x-axis for all subplots
     for i in range(num_plots):
         ax[i].sharex(ax[0])
 
     ax[0].plot(ecg_data["times"], ecg_data["values"])
-    ax[0].plot(ecg_peaks, ecg_data["values"][idx_ecg], "x")
+    ax[0].plot(ecg_data["times"][idx_ecg], ecg_data["values"][idx_ecg], "x")
     ax[0].set_title("ECG")
     ax[0].set_xlabel("Time (s)")
 
     ax[1].plot(ppg_data["times"], ppg_data["values"])
-    ax[1].plot(ppg_peaks, ppg_data["values"][idx_ppg], "x")
+    ax[1].plot(ppg_data["times"][idx_ppg], ppg_data["values"][idx_ppg], "x")
     ax[1].set_title("PPG")
     ax[1].set_xlabel("Time (s)")
 
-    ax[2].plot(ecg_peaks[: m_peaks.size], m_peaks, "x")
-    ax[2].set_title("Distance to matching PPG Peak")
+    pat_idx = pats[:, 0].astype(int)
+    pat_values = pats[:, 1]
+
+    ax[2].plot(ecg_data["times"][idx_ecg][pat_idx], pat_values, "x")
+    ax[2].set_title("PAT")
     ax[2].set_xlabel("Time (s)")
-    ax[2].set_ylabel("Num Peaks Apart")
-    ax[2].yaxis.grid(True)
-
-    ax[3].plot(ecg_peaks[: pats.size], pats, "x")
-    ax[3].set_title("PAT")
-    ax[3].set_xlabel("Time (s)")
-    ax[3].set_ylabel("PAT (s)")
-    ax[3].yaxis.grid(True)
-
-    ax[4].plot(ecg_peaks[: pats.size], pats, "x")
-    ax[4].set_title("PAT (Zoomed)")
-    ax[4].set_xlabel("Time (s)")
-    ax[4].set_ylabel("PAT (s)")
-    ax[4].set_ylim(1.2, 1.8)
-    ax[4].grid(True)
-
-    ax[5].plot(ppg_peaks[:-2], np.diff(hr))
-    ax[5].set_title("Change in HR")
-
-    quality = np.absolute(np.diff(hr)) < 20
-    ax[6].plot(ppg_peaks[:-2], quality)
-    ax[6].set_title("Signal Quality Pass")
+    ax[2].set_ylabel("PAT (s)")
+    ax[2].set_ylim(1.0, 1.7)
+    ax[2].grid(True)
 
     plt.tight_layout()
 

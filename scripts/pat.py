@@ -170,11 +170,13 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.200):
     """
 
     # Assert no nans in signal values (Causes peak detection to fail)
-    assert not np.isnan(ecg["values"]).any() == "ECG has NaNs"
-    assert not np.isnan(ppg["values"]).any() == "PPG has NaNs"
+    # assert not np.isnan(ecg["values"]).any() == "ECG has NaNs"
+    # assert not np.isnan(ppg["values"]).any() == "PPG has NaNs"
 
     ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
     ppg_peak_times = ppg_peak_detect(ppg["times"], ppg["values"], ppg_freq)
+
+    print(ecg_peak_times.size, ppg_peak_times.size)
 
     matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times)
 
@@ -196,12 +198,14 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.200):
     baseline_pat = np.median(pats[:, 1])
     corrected_pats = pats[np.where(np.abs(pats[:, 1] - baseline_pat) < pat_range)]
 
+    n_cleaned = pats.size - corrected_pats.size
+
     print(f"Median PAT: {baseline_pat}")
     print(f"Mean PAT: {np.mean(pats[:, 1])}")
-    print(f"Removed {pats.size - corrected_pats.size} outliers")
+    print(f"Removed {n_cleaned} outliers")
     print(f"Mean Corrected PAT: {np.mean(corrected_pats[:, 1])}")
 
-    return corrected_pats, ecg_peak_times, ppg_peak_times
+    return corrected_pats, ecg_peak_times, ppg_peak_times, n_cleaned
 
 
 def naive_calculate_pat(ecg, ecg_freq, ppg, ppg_freq):
@@ -238,43 +242,28 @@ if __name__ == "__main__":
     ecg_data["times"] = ecg_data["times"] / 10**9
     ppg_data["times"] = ppg_data["times"] / 10**9
 
-    pats, ecg_peak_times, ppg_peak_times = calclulate_pat(
+    pats, ecg_peak_times, ppg_peak_times, n_cleaned = calclulate_pat(
         ecg_data, ecg_freq, ppg_data, ppg_freq
     )
     print("Finished calculating PAT...")
 
-    fix, ax = plt.subplots(1, figsize=(25, 20))
-    ax.plot(pats[:, 0], pats[:, 1], "x")
-    # ax.plot(ecg_data["times"][idx_ecg], ecg_data["values"][idx_ecg], "x")
-    plt.show()
-
-    exit()
-
-    x = np.array([d[1] for d in dist])
-    y = np.array([d[0] for d in dist])
-    x_noise = np.random.normal(0, 0.1, x.size)
+    # x = np.array([d[1] for d in dist])
+    # y = np.array([d[0] for d in dist])
+    # x_noise = np.random.normal(0, 0.1, x.size)
 
     # ax.plot(m_peaks[:-1] + x_noise, 60 / np.diff(ecg_peaks[: pats.size]), "x")
-    ax.plot(x + x_noise, y, "x")
-    ax.set_title("HR vs PAT")
-    ax.set_xlabel("Distance to matching PPG Peak (num peaks)")
-    ax.set_ylabel("Eculedian Distance")
-    plt.show()
-
-    # clean_pats = pats[(pats > 0.5) & (pats < 2)]
+    # ax.plot(x + x_noise, y, "x")
+    # ax.set_title("HR vs PAT")
+    # ax.set_xlabel("Distance to matching PPG Peak (num peaks)")
+    # ax.set_ylabel("Eculedian Distance")
+    # plt.show()
 
     plot_pat(
         ecg_data,
-        ecg_peaks,
+        ecg_peak_times,
         ppg_data,
-        ppg_peaks,
-        idx_ecg,
-        idx_ppg,
-        m_peaks,
+        ppg_peak_times,
         pats,
-        hr,
         show=True,
         save=False,
     )
-
-    # plot_pat_hist(clean_pats, show=True, save=False)

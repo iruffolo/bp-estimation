@@ -76,14 +76,17 @@ def process_pat(itr, dev):
             print(f"Error in calculating PAT: {e}")
             continue
 
-        if i > 5:
+        if i > 20000:
             break
 
     # Flatten all the patient data
     # for k, v in p.items():
     #     p[k]["pat"] = np.concatenate(v["pat"])
 
-    return p
+    np.save(f"raw_data/shuffle/results_{dev}.npy", p)
+    print(f"Finished processing device {dev}")
+
+    return True
 
 
 def process(
@@ -138,9 +141,9 @@ def process(
         definition,
         window_size_nano,
         window_size_nano,
-        num_windows_prefetch=1,
+        num_windows_prefetch=100,
         # cached_windows_per_source=1,
-        shuffle=False,
+        shuffle=True,
     )
 
     return process_pat(itr, device)
@@ -149,11 +152,13 @@ def process(
 if __name__ == "__main__":
 
     local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
-    num_cores = 10
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
+
+    num_cores = 10  # len(devices)
+    # print(f"Using {num_cores} cores")
 
     # process(local_dataset, 74)
     # exit()
@@ -162,17 +167,9 @@ if __name__ == "__main__":
 
         futures = {pp.submit(process, local_dataset, d): d for d in devices}
 
-        results = [f.result() for f in concurrent.futures.as_completed(futures)]
-
-        # for f in concurrent.futures.as_completed(futures):
-        #     print(f"Finished processing {futures[f]}")
-        #     try:
-        #         results.append(f.result())
-        #     except Exception as e:
-        #         print(f"Error in results: {e}")
-        print(f"Results len {len(results)}")
-        np.save("raw_data/results.npy", results)
-        print("Results saved")
+        for f in concurrent.futures.as_completed(futures):
+            print(f.result())
+        # print(f"Results len {len(results)}")
 
         # pats = np.concatenate([v["pat"] for r in results for _, v in r.items()])
         # print(f"N pats: {len(pats)}")
@@ -190,4 +187,5 @@ if __name__ == "__main__":
         # plt.ylabel("Frequency")
         # plt.savefig("plots/pat_all_dist_clean")
         #
+
     print("Finished processing")

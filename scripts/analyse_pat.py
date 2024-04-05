@@ -1,0 +1,155 @@
+import glob
+from datetime import datetime
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from atriumdb import AtriumSDK
+
+
+def plot_hist(files, save=True, show=True):
+    """
+    Plot histogram of PAT data
+
+    :param data: PAT data
+    :param p_id: Patient ID
+    :param save: Save plot
+    :return: None
+    """
+
+    slice_l = 1250
+    slice_u = 2500
+
+    bins = np.linspace(0, 4, 5000)[slice_l : slice_u + 1]
+
+    for r in files:
+
+        data = np.load(f"{r}", allow_pickle=True).item()
+
+        for p_id, data in data.items():
+            print(p_id, data)
+
+            fig, ax = plt.subplots(1, figsize=(10, 10))
+
+            ax.stairs(data[slice_l:slice_u], bins, fill=True, alpha=0.8)
+
+            plt.suptitle(f"PAT Distribution for Patient {p_id}")
+            plt.xlabel("Time (s)")
+            plt.ylabel("Frequency")
+
+            if save:
+                plt.savefig(f"plots/histograms/pat_hist_{p_id}.png")
+
+            if show:
+                plt.show()
+
+            plt.close()
+
+
+def compile_plots(files, shape=4999):
+    """
+    Compile all plots into a single density plot
+
+    :return: None
+    """
+
+    total_pats = np.zeros(shape)
+    print(total_pats.shape)
+
+    for r in files:
+
+        data = np.load(f"{r}", allow_pickle=True).item()
+
+        for k, v in data.items():
+            print(k, v)
+            total_pats += v["pat"]
+            print(np.sum(total_pats))
+
+    slice_l = 500
+    slice_u = 3500
+    bins = np.linspace(0, 4, 5000)[slice_l : slice_u + 1]
+
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    ax.stairs(total_pats[slice_l:slice_u], bins, fill=True, alpha=0.8)
+
+    plt.suptitle(f"Total PAT Distribution ({np.sum(total_pats)} measurements)")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency")
+
+    plt.show()
+
+
+def get_age_from_dob(dob):
+    """
+    Get age from date of birth
+
+    :param dob: Date of birth (nanosecond epoch)
+    :return: Age
+    """
+
+    return (datetime.now() - datetime.fromtimestamp(dob / 10**9)).days / 365.2425
+
+
+def plot_by_age(files, shape=4999, max_age=15):
+    """
+    Map ages to patient IDs
+
+    :return: None
+    """
+
+    local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
+    sdk = AtriumSDK(dataset_location=local_dataset)
+
+    pat_by_age = {}
+
+    for r in files:
+
+        data = np.load(f"{r}", allow_pickle=True).item()
+
+        for pat_id, v in data.items():
+            if pat_id:
+                info = sdk.get_patient_info(pat_id)
+                age = min(int(get_age_from_dob(info["dob"])), max_age)
+
+                print(f"Patient {pat_id} is {age} years old")
+                print(np.sum(v["pat"]))
+
+                if age not in pat_by_age:
+                    pat_by_age[age] = {}
+                    pat_by_age[age]["data"] = np.zeros(shape)
+                    pat_by_age[age]["count"] = 0
+
+                pat_by_age[age]["data"] += v["pat"]
+                pat_by_age[age]["count"] += 1
+
+    print(pat_by_age)
+    pat_by_age = dict(sorted(pat_by_age.items()))
+
+    fig, ax = plt.subplots(len(pat_by_age), figsize=(10, 35))
+
+    slice_l = 1250
+    slice_u = 2500
+    bins = np.linspace(0, 4, 5000)[slice_l : slice_u + 1]
+
+    for i, (age, pat) in enumerate(pat_by_age.items()):
+        ax[i].stairs(pat["data"][slice_l:slice_u], bins, fill=True, alpha=0.8)
+        ax[i].set_title(
+            f"PAT Distribution for Patients {age} years old ({pat['count']} patients)"
+        )
+        ax[i].set_xlabel("Time (s)")
+        ax[i].set_ylabel("Frequency")
+        ax[i].sharex(ax[0])
+
+    plt.tight_layout()
+    plt.savefig("plots/pat_by_age_shuffle.png")
+    # plt.show()
+
+
+if __name__ == "__main__":
+
+    files = glob.glob("raw_data/shuffle/*results_*.npy")
+    print(f"Files: {files}")
+
+    # compile_plots(files)
+    # plot_hist(files)
+    plot_by_age(files)

@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
-
 from data_quality import DataValidator
 from pat import calclulate_pat
 from plotting import plot_pat, plot_pat_hist
@@ -158,7 +157,6 @@ if __name__ == "__main__":
     print(f"Devices: {devices}")
 
     num_cores = 10  # len(devices)
-    # print(f"Using {num_cores} cores")
 
     # process(local_dataset, 74)
     # exit()
@@ -169,23 +167,5 @@ if __name__ == "__main__":
 
         for f in concurrent.futures.as_completed(futures):
             print(f.result())
-        # print(f"Results len {len(results)}")
-
-        # pats = np.concatenate([v["pat"] for r in results for _, v in r.items()])
-        # print(f"N pats: {len(pats)}")
-        # clean_pats = pats[(pats > 0) & (pats < 3)]
-        #
-        # sns.displot(pats, bins=100)
-        # plt.suptitle(f"PAT over {len(results)} windows")
-        # plt.xlabel("Time (s)")
-        # plt.ylabel("Frequency")
-        # plt.savefig("plots/pat_all_dist")
-        #
-        # sns.displot(clean_pats, bins=100)
-        # plt.suptitle(f"PAT over {len(results)} windows")
-        # plt.xlabel("Time (s)")
-        # plt.ylabel("Frequency")
-        # plt.savefig("plots/pat_all_dist_clean")
-        #
 
     print("Finished processing")

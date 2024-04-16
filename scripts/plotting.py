@@ -68,7 +68,8 @@ def plot_pat(
     pat_idx = pats[:, 0].astype(int)
     pat_values = pats[:, 1]
 
-    ax[2].plot(ecg_data["times"][idx_ecg][pat_idx], pat_values, "x")
+    # ax[2].plot(ecg_data["times"][idx_ecg][pat_idx], pat_values, "x")
+    ax[2].plot(ecg_peak_times[pat_idx], pat_values, "x")
     ax[2].set_title("PAT")
     ax[2].set_xlabel("Time (s)")
     ax[2].set_ylabel("PAT (s)")

@@ -3,6 +3,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from atriumdb import AtriumSDK
 
@@ -45,6 +46,53 @@ def plot_hist(files, save=True, show=True):
 
             plt.close()
 
+
+def plot_by_date(files, shape=4999):
+    """
+    Split plot into date ranges
+    """
+
+    total_pats = {} 
+
+    for r in files:
+
+        data = np.load(f"{r}", allow_pickle=True).item()
+
+        for k, v in data.items():
+            print(k, v)
+
+            year = pd.to_datetime(v["visit_time"], unit='s').year
+            month = pd.to_datetime(v["visit_time"], unit='s').month
+            print(year, month)
+
+            if year not in total_pats:
+                total_pats[year] = {} 
+            if month not in total_pats[year]:
+                total_pats[year][month] = np.zeros(shape)
+
+            total_pats[year][month] += v["pat"]
+            # print(np.sum(total_pats))
+
+    slice_l = 500
+    slice_u = 3500
+    bins = np.linspace(0, 4, 5000)[slice_l : slice_u + 1]
+
+    fig, ax = plt.subplots(12, figsize=(10, 10))
+
+    for m in total_pats[2022].keys():
+        ax[m-1].stairs(total_pats[2022][m][slice_l:slice_u], bins, fill=True, alpha=0.8, 
+                  label=f"{m}")
+        ax[m-1].legend()
+    # for year in total_pats.keys():
+    #     ax.stairs(total_pats[year][slice_l:slice_u], bins, fill=True, alpha=0.8, 
+    #               label=f"{year}")
+
+    plt.legend()
+    plt.suptitle(f"PAT Distributions by Year")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency")
+
+    plt.show()
 
 def compile_plots(files, shape=4999):
     """
@@ -147,9 +195,11 @@ def plot_by_age(files, shape=4999, max_age=15):
 
 if __name__ == "__main__":
 
-    files = glob.glob("raw_data/shuffle/*results_*.npy")
+    # files = glob.glob("raw_data/shuffle/*results_*.npy")
+    files = glob.glob("raw_data/datesplit/*results_*.npy")
     print(f"Files: {files}")
 
+    plot_by_date(files)
     # compile_plots(files)
     # plot_hist(files)
-    plot_by_age(files)
+    # plot_by_age(files)

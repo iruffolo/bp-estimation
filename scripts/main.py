@@ -10,7 +10,7 @@ from pat import calclulate_pat
 from plotting import plot_pat, plot_pat_hist
 
 
-def process_pat(itr, dev):
+def process_pat(itr, dev, sdk):
     """
     Processing function for dataset iterator
 
@@ -35,9 +35,13 @@ def process_pat(itr, dev):
             (v, k[1] / 10**9) for k, v in w.signals.items() if "PULS" in k[0]
         ][0]
 
+        print(w)
+
         # if (np.isnan(ecg_data["values"]).any()) or (np.isnan(ppg_data["values"]).any()):
         #     print("Skipping window due to NaNs")
         #     continue
+
+        dob = pd.to_datetime(sdk.get_patient_info(w.patient_id)["dob"])
 
         ecg_data["times"] = ecg_data["times"] / 10**9
         ppg_data["times"] = ppg_data["times"] / 10**9
@@ -53,7 +57,11 @@ def process_pat(itr, dev):
             if ratio > 0.5:
 
                 if w.patient_id not in p.keys():
-                    p[w.patient_id] = {"pat": np.histogram([], bins=bins)[0]}
+                    p[w.patient_id] = {
+                        "pat": np.histogram([], bins=bins)[0],
+                        "dob": dob,
+                        "visit_time": ecg_data["times"][0],
+                    }
 
                 # p[w.patient_id]["pat"].append(pats[:, 1])
                 p[w.patient_id]["pat"] += np.histogram(pats[:, 1], bins=bins)[0]
@@ -75,14 +83,14 @@ def process_pat(itr, dev):
             print(f"Error in calculating PAT: {e}")
             continue
 
-        if i > 20000:
+        if i > 5000:
             break
 
     # Flatten all the patient data
     # for k, v in p.items():
     #     p[k]["pat"] = np.concatenate(v["pat"])
 
-    np.save(f"raw_data/shuffle/results_{dev}.npy", p)
+    np.save(f"raw_data/datesplit/results_{dev}.npy", p)
     print(f"Finished processing device {dev}")
 
     return True
@@ -141,11 +149,11 @@ def process(
         window_size_nano,
         window_size_nano,
         num_windows_prefetch=100,
-        # cached_windows_per_source=1,
+        cached_windows_per_source=10,
         shuffle=True,
     )
 
-    return process_pat(itr, device)
+    return process_pat(itr, device, sdk)
 
 
 if __name__ == "__main__":

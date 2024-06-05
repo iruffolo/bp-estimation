@@ -4,15 +4,14 @@ import heartpy as hp
 import matplotlib.pyplot as plt
 import neurokit2 as nk
 import numpy as np
-from biosppy.signals import ecg
+from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
+from plotting import plot_pat, plot_pat_hist
 from scipy.linalg import norm
 from scipy.spatial import distance
 
-from plotting import plot_pat, plot_pat_hist
 
-
-def ppg_peak_detect(signal_times, signal_values, freq_hz):
+def peak_detect(signal_times, signal_values, freq_hz):
     """
     Get peaks from PPG
 
@@ -51,8 +50,7 @@ def rpeak_detect_fast(signal_times, signal_values, freq_hz):
         clean_signal = nk.ecg_clean(signal_values, sampling_rate=int(freq_hz))
         signals, info = nk.ecg_peaks(clean_signal, sampling_rate=int(freq_hz))
     except Exception as e:
-        pass
-        # print(f"Error: {e}")
+        print(f"Error: {e}")
 
     peak_indices = info["ECG_R_Peaks"]
 
@@ -76,7 +74,7 @@ def closest_argmin(x, y):
     return np.array(z.argmin(axis=-1)).astype(int)
 
 
-def get_quality_index(signal, threshold=30):
+def get_quality_index(signal, threshold=50):
     """
     Get quality of signal based on the interbeat intervals and change in HR
 
@@ -156,7 +154,7 @@ def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
     return matching_peaks
 
 
-def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.200):
+def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.300, expected=1.2):
     """
     Calculate PAT
 
@@ -174,38 +172,44 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.200):
     # assert not np.isnan(ppg["values"]).any() == "PPG has NaNs"
 
     ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-    ppg_peak_times = ppg_peak_detect(ppg["times"], ppg["values"], ppg_freq)
+    ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-    print(ecg_peak_times.size, ppg_peak_times.size)
+    ssize = 6
+    matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times, ssize=ssize)
 
-    matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times)
+    pats = list()
+    for m in matching_peaks:
+        best = 0
+        for s in range(ssize):
+            pat = ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
 
-    pats = np.array(
-        [
-            (
-                m.ecg_peak,
-                ppg_peak_times[m.nearest_ppg_peak + m.n_peaks]
-                - ecg_peak_times[m.ecg_peak],
-            )
-            for m in matching_peaks
-        ]
-    )
+            if abs(pat - expected) < abs(best - expected):
+                best = pat
 
-    # TODO: Can attempt to correct the PAT values here by shifting the matching
-    # peak forward/backwards
+        if expected - pat_range < best < expected + pat_range:
+            pats.append((m.ecg_peak, best))
 
-    # Remove PAT outliers
-    baseline_pat = np.median(pats[:, 1])
-    corrected_pats = pats[np.where(np.abs(pats[:, 1] - baseline_pat) < pat_range)]
+    return np.array(pats), ecg_peak_times, ppg_peak_times
 
-    n_cleaned = pats.size - corrected_pats.size
 
-    print(f"Median PAT: {baseline_pat}")
-    print(f"Mean PAT: {np.mean(pats[:, 1])}")
-    print(f"Removed {n_cleaned} outliers")
-    print(f"Mean Corrected PAT: {np.mean(corrected_pats[:, 1])}")
+def calc_pat_abp(ecg, ecg_freq, abp, abp_freq):
+    """ """
 
-    return corrected_pats, ecg_peak_times, ppg_peak_times, n_cleaned
+    ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
+    abp_peak_times = peak_detect(abp["times"], abp["values"], abp_freq)
+
+    pats = []
+
+    for p in ecg_peak_times:
+        try:
+            idx = np.where(abp_peak_times > p)[0][0]
+
+            pats.append((idx, abp_peak_times[idx] - p))
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+    return np.array(pats), ecg_peak_times, abp_peak_times, 1
 
 
 def naive_calculate_pat(ecg, ecg_freq, ppg, ppg_freq):
@@ -231,6 +235,7 @@ if __name__ == "__main__":
     print("Calculating PAT...")
 
     w = np.load("raw_data/data_0_hourly.npy", allow_pickle=True).item()
+    # w = np.load("raw_data/data_6.npy", allow_pickle=True).item()
 
     ecg_data, ecg_freq = [
         (v, k[1] / 10**9) for k, v in w.signals.items() if "ECG" in k[0]
@@ -238,13 +243,27 @@ if __name__ == "__main__":
     ppg_data, ppg_freq = [
         (v, k[1] / 10**9) for k, v in w.signals.items() if "PULS" in k[0]
     ][0]
+    abp_data, abp_freq = [
+        (v, k[1] / 10**9) for k, v in w.signals.items() if "ABP" in k[0]
+    ][0]
 
     ecg_data["times"] = ecg_data["times"] / 10**9
     ppg_data["times"] = ppg_data["times"] / 10**9
+    abp_data["times"] = abp_data["times"] / 10**9
+
+    print(f"Freqs: {ecg_freq}, {ppg_freq}, {abp_freq}")
 
     pats, ecg_peak_times, ppg_peak_times, n_cleaned = calclulate_pat(
         ecg_data, ecg_freq, ppg_data, ppg_freq
     )
+    # abp_pats, _, abp_peak_times, abp_n_cleaned = calclulate_pat(
+    # ecg_data, ecg_freq, abp_data, abp_freq
+    # )
+
+    abp_pats, _, abp_peak_times, _ = calc_pat_abp(
+        ecg_data, ecg_freq, abp_data, abp_freq
+    )
+
     print("Finished calculating PAT...")
 
     # x = np.array([d[1] for d in dist])
@@ -263,7 +282,10 @@ if __name__ == "__main__":
         ecg_peak_times,
         ppg_data,
         ppg_peak_times,
+        abp_data,
+        abp_peak_times,
         pats,
+        abp_pats,
         show=True,
         save=False,
     )

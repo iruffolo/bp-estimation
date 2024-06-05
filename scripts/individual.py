@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
-
 from pat import calclulate_pat
 
 

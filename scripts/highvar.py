@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
 from pat import calclulate_pat
+from sawtooth import fit_sawtooth
 
 
 def setup_db(local_dataset, patient_id):
@@ -63,10 +65,15 @@ if __name__ == "__main__":
 
     itr = setup_db("/mnt/datasets/atriumdb_abp_estimation_2024_02_05", chosen_one)
 
+    timestamps = []
     pat = []
-    total_n_cleaned = 0
+    sawtooth = []
+    corrected = []
+    sawtooth_A = []
+    sawtooth_freq = []
+    sawtooth_offset = []
 
-    num_plots = 4
+    num_plots = 5
     fig, ax = plt.subplots(num_plots, figsize=(15, 10))
 
     # Share x-axis for all subplots
@@ -90,10 +97,6 @@ if __name__ == "__main__":
         ppg_data["times"] = ppg_data["times"] / 10**9
         abp_data["times"] = abp_data["times"] / 10**9
 
-        # if (np.isnan(ecg_data["values"]).any()) or (np.isnan(ppg_data["values"]).any()):
-        #     print("Skipping window due to NaNs")
-        #     continue
-
         try:
             pats, ecg_peak_times, ppg_peak_times = calclulate_pat(
                 ecg_data,
@@ -101,11 +104,33 @@ if __name__ == "__main__":
                 ppg_data,
                 ppg_freq,
             )
-            pat.append(pats)
+
+            if len(pats) == 0:
+                continue
 
             # Find indicies from values of times
             idx_ecg = np.nonzero(np.in1d(ecg_data["times"], ecg_peak_times))[0]
             idx_ppg = np.nonzero(np.in1d(ppg_data["times"], ppg_peak_times))[0]
+
+            pat_idx = pats[:, 0].astype(int)
+            pat_values = pats[:, 1]
+            pat_x = ecg_data["times"][idx_ecg][pat_idx]
+
+            # Get Sawtooth and plot
+            st, params = fit_sawtooth(pat_x, pat_values, False)
+
+            corrected_pat = pat_values - st + params[2]
+
+            # Store a bunch of values for plotting
+            timestamps.append(pat_x)
+            pat.append(pats)
+            sawtooth.append(st)
+            corrected.append(corrected_pat)
+
+            for i in range(len(st)):
+                sawtooth_A.append(params[0])
+                sawtooth_freq.append(params[1])
+                sawtooth_offset.append(params[2])
 
             ax[0].plot(abp_data["times"], abp_data["values"], "b")
             ax[1].plot(ecg_data["times"], ecg_data["values"], "b")
@@ -113,9 +138,9 @@ if __name__ == "__main__":
             ax[2].plot(ppg_data["times"], ppg_data["values"], "b")
             ax[2].plot(ppg_data["times"][idx_ppg], ppg_data["values"][idx_ppg], "rx")
 
-            pat_idx = pats[:, 0].astype(int)
-            pat_values = pats[:, 1]
-            ax[3].plot(ecg_data["times"][idx_ecg][pat_idx], pat_values, "b.")
+            ax[3].plot(pat_x, st)
+            ax[3].plot(pat_x, pat_values, "b.")
+            ax[4].plot(pat_x, corrected_pat, "r.")
 
         except Exception as e:
             print(e)
@@ -131,14 +156,47 @@ if __name__ == "__main__":
     ax[3].set_title("PAT")
     ax[3].set_xlabel("Time (s)")
     ax[3].set_ylabel("Time (s)")
-    # ax[3].set_ylim(1.0, 1.7)
+    ax[3].set_ylim(1.0, 1.7)
     ax[3].grid(True)
+
+    ax[4].set_title("Corrected PAT")
+    ax[4].set_xlabel("Time (s)")
+    ax[4].set_ylabel("Time (s)")
+    ax[4].set_ylim(1.0, 1.7)
+    ax[4].grid(True)
+    ax[4].sharey(ax[3])
 
     plt.suptitle(f"Patient {chosen_one}")
     plt.tight_layout()
     plt.show()
 
-    pat = np.array([y for x in pat for y in x])
+    # Flatten lists
+    pat = np.array([y[1] for x in pat for y in x])
+    corrected = np.array([y for x in corrected for y in x])
+    sawtooth = np.array([y for x in sawtooth for y in x])
+    timestamps = np.array([y for x in timestamps for y in x])
+    sawtooth_A = np.array(sawtooth_A)
+    sawtooth_freq = np.array(sawtooth_freq)
+    sawtooth_offset = np.array(sawtooth_offset)
 
-    sns.displot(pat[:, 1], kde=True)
+    print(pat.shape, corrected.shape, sawtooth.shape, timestamps.shape)
+
+    # Convert to pandas
+    df = pd.DataFrame(
+        {
+            "time": timestamps,
+            "pat": pat,
+            "sawtooth": sawtooth,
+            "corrected": corrected,
+            "sawtooth_A": sawtooth_A,
+            "sawtooth_freq": sawtooth_freq,
+            "sawtooth_offset": sawtooth_offset,
+        }
+    )
+
+    print(df.head())
+    # Save to csv
+    df.to_csv(f"pats.csv", index=False)
+
+    sns.displot(pat, kde=True)
     plt.show()

@@ -6,16 +6,16 @@ import scipy.signal
 from scipy.optimize import curve_fit, differential_evolution
 
 
-def _create_sawtooth(x, A, fi, offset):
+def _create_sawtooth(x, A, freq, offset):
     """
     Create a sawtooth wave
 
     :param x: x values
     :param A: Amplitude
-    :param fi: Frequency
+    :param freq: Frequency
     :param offset: Offset
     """
-    return A * scipy.signal.sawtooth(x / fi) + offset
+    return A * scipy.signal.sawtooth(x / freq) + offset
 
 
 def fit_sawtooth(x, y, plot=False):

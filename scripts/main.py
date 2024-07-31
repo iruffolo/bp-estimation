@@ -159,6 +159,7 @@ def process(
 if __name__ == "__main__":
 
     local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
+    local_dataset = "/mnt/datasets/ians_data_2024_06_12"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     devices = list(sdk.get_all_devices().keys())
@@ -166,7 +167,7 @@ if __name__ == "__main__":
 
     num_cores = 10  # len(devices)
 
-    # process(local_dataset, 74)
+    process(local_dataset, 80)
     # exit()
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:

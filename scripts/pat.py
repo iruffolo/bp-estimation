@@ -4,11 +4,13 @@ import heartpy as hp
 import matplotlib.pyplot as plt
 import neurokit2 as nk
 import numpy as np
+from atriumdb import AtriumSDK
 from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
-from plotting import plot_pat, plot_pat_hist
 from scipy.linalg import norm
 from scipy.spatial import distance
+
+from plotting import plot_pat, plot_pat_hist
 
 
 def peak_detect(signal_times, signal_values, freq_hz):
@@ -131,7 +133,8 @@ def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
 
         # Signal quality passed and within idx bounds for search
         if (
-            idx + wsize + ssize < ppg_peak_times.size
+            idx + wsize + ssize
+            < ppg_peak_times.size
             and ppg_quality[idx : idx + wsize + ssize].all()
         ):
 
@@ -154,7 +157,7 @@ def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
     return matching_peaks
 
 
-def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.300, expected=1.2):
+def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=1.300, expected=1.2):
     """
     Calculate PAT
 
@@ -176,18 +179,22 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.300, expected=1.2):
 
     ssize = 6
     matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times, ssize=ssize)
-
     pats = list()
+
     for m in matching_peaks:
-        best = 0
-        for s in range(ssize):
-            pat = ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
+        pat = ppg_peak_times[m.nearest_ppg_peak + m.n_peaks] - ecg_peak_times[m.ecg_peak]
+        pats.append((m.ecg_peak, pat))
 
-            if abs(pat - expected) < abs(best - expected):
-                best = pat
-
-        if expected - pat_range < best < expected + pat_range:
-            pats.append((m.ecg_peak, best))
+    # for m in matching_peaks:
+    #     best = 0
+    #     for s in range(ssize):
+    #         pat = ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
+    #
+    #         if abs(pat - expected) < abs(best - expected):
+    #             best = pat
+    #
+    #     if expected - pat_range < best < expected + pat_range:
+    #         pats.append((m.ecg_peak, best))
 
     return np.array(pats), ecg_peak_times, ppg_peak_times
 
@@ -209,7 +216,7 @@ def calc_pat_abp(ecg, ecg_freq, abp, abp_freq):
         except Exception as e:
             print(f"Error: {e}")
 
-    return np.array(pats), ecg_peak_times, abp_peak_times, 1
+    return np.array(pats), ecg_peak_times, abp_peak_times
 
 
 def naive_calculate_pat(ecg, ecg_freq, ppg, ppg_freq):
@@ -217,8 +224,8 @@ def naive_calculate_pat(ecg, ecg_freq, ppg, ppg_freq):
     Naive calculation of PAT
     """
 
-    ecg_peak_times, idx_ecg = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-    ppg_peak_times, idx_ppg = ppg_peak_detect(ppg["times"], ppg["values"], ppg_freq)
+    ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
+    ppg_peak_times= peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
     times = closest_argmin(ecg_peak_times, ppg_peak_times)
 
@@ -234,8 +241,9 @@ if __name__ == "__main__":
 
     print("Calculating PAT...")
 
-    w = np.load("raw_data/data_0_hourly.npy", allow_pickle=True).item()
-    # w = np.load("raw_data/data_6.npy", allow_pickle=True).item()
+    # w = np.load("raw_data/data_0_hourly.npy", allow_pickle=True).item()
+    local_dataset = "/mnt/datasets/ians_data_2024_06_12"
+    sdk = AtriumSDK(dataset_location=local_dataset)
 
     ecg_data, ecg_freq = [
         (v, k[1] / 10**9) for k, v in w.signals.items() if "ECG" in k[0]

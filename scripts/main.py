@@ -8,102 +8,81 @@ from atriumdb import AtriumSDK, DatasetDefinition
 from data_quality import DataValidator
 from pat import calclulate_pat
 from plotting import plot_pat, plot_pat_hist
+from tqdm import tqdm
 
 
-def process_pat(itr, dev, sdk):
+def process_pat(sdk, dev, itr):
     """
     Processing function for dataset iterator
 
-    :param itr: Dataset iterator
+    :param sdk: AtriumSDK instance
     :param dev: Device ID
+    :param itr: Dataset iterator
 
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    p = {}
-    # dv = DataValidator()
-    bins = np.linspace(0, 4, 5000)
+    results = {}
+    total_corrected = 0
+
+    # Progress bar
+    pbar = tqdm(total=itr._length, desc="Processing Windows")
 
     for i, w in enumerate(itr):
-        print(f"Processing window {i}... Patient {w.patient_id}")
+        # Check if patient exists in results
+        if w.patient_id not in results.keys():
+            # Get patient date of birth
+            dob = pd.to_datetime(sdk.get_patient_info(w.patient_id)["dob"])
 
-        # Extract specific signals
-        ecg_data, ecg_freq = [
-            (v, k[1] / 10**9) for k, v in w.signals.items() if "ECG" in k[0]
-        ][0]
-        ppg_data, ppg_freq = [
-            (v, k[1] / 10**9) for k, v in w.signals.items() if "PULS" in k[0]
-        ][0]
+            results[w.patient_id] = {
+                "times": np.array([]),
+                "pat": np.array([]),
+                "naive_pat": np.array([]),
+                "dob": dob,
+            }
 
-        print(w)
+        # Extract specific signals and convert timescale
+        ecg, ecg_freq = [(v, k[1]) for k, v in w.signals.items() if "ECG" in k[0]][0]
+        ppg, ppg_freq = [(v, k[1]) for k, v in w.signals.items() if "PULS" in k[0]][0]
 
-        # if (np.isnan(ecg_data["values"]).any()) or (np.isnan(ppg_data["values"]).any()):
-        #     print("Skipping window due to NaNs")
-        #     continue
-
-        dob = pd.to_datetime(sdk.get_patient_info(w.patient_id)["dob"])
-
-        ecg_data["times"] = ecg_data["times"] / 10**9
-        ppg_data["times"] = ppg_data["times"] / 10**9
+        ecg["times"] = ecg["times"] / 10**9
+        ppg["times"] = ppg["times"] / 10**9
 
         try:
-            pats, ecg_peak_times, ppg_peak_times, n_cleaned = calclulate_pat(
-                ecg_data, ecg_freq, ppg_data, ppg_freq
+            pats, naive_pats, corrected = calclulate_pat(ecg, ecg_freq, ppg, ppg_freq)
+
+            total_corrected += corrected
+
+            results[w.patient_id]["times"] = np.concatenate(
+                (results[w.patient_id]["times"], pats[:, 0])
             )
-
-            ratio = pats.shape[0] / ecg_peak_times.shape[0]
-
-            # Another quality check
-            if ratio > 0.5:
-
-                if w.patient_id not in p.keys():
-                    p[w.patient_id] = {
-                        "pat": np.histogram([], bins=bins)[0],
-                        "dob": dob,
-                        "visit_time": ecg_data["times"][0],
-                    }
-
-                # p[w.patient_id]["pat"].append(pats[:, 1])
-                p[w.patient_id]["pat"] += np.histogram(pats[:, 1], bins=bins)[0]
-
-                # if i < 10:
-                #     plot_pat(
-                #         ecg_data,
-                #         ecg_peak_times,
-                #         ppg_data,
-                #         ppg_peak_times,
-                #         pats,
-                #         show=False,
-                #         save=True,
-                #         patient_id=w.patient_id,
-                #         device_id=dev,
-                #     )
+            results[w.patient_id]["pat"] = np.concatenate(
+                (results[w.patient_id]["pat"], pats[:, 1])
+            )
+            results[w.patient_id]["naive_pat"] = np.concatenate(
+                (results[w.patient_id]["naive_pat"], naive_pats)
+            )
 
         except Exception as e:
             print(f"Error in calculating PAT: {e}")
             continue
 
-        if i > 5000:
-            break
+        pbar.update(1)
 
-    # Flatten all the patient data
-    # for k, v in p.items():
-    #     p[k]["pat"] = np.concatenate(v["pat"])
-
-    np.save(f"raw_data/datesplit/results_{dev}.npy", p)
+    np.save(f"../data/results/device{dev}_pats.npy", results)
     print(f"Finished processing device {dev}")
 
-    return True
+    return results
 
 
-def process(
-    dataset_location,
+def make_device_itr(
+    sdk,
     device,
-    window_size_nano=60 * 10 * (10**9),
-    gap_tol_nano=0.5 * (10**9),
+    window_size_nano=60 * 20 * (10**9),
+    gap_tol_nano=0.3 * (10**9),
 ):
     """
-    Creates new SDK instance and iterator for device
+    Creates new SDK instance and iterator for a specific device
 
     :param sdk: AtriumSDK instance
     :param device: Device ID
@@ -113,7 +92,7 @@ def process(
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    sdk = AtriumSDK(dataset_location=dataset_location)
+    print(f"Building dataset, device: {device}")
 
     measures = [
         {
@@ -133,8 +112,6 @@ def process(
         },
     ]
 
-    print(f"Building dataset, device: {device}")
-
     definition = DatasetDefinition.build_from_intervals(
         sdk,
         "measures",
@@ -149,26 +126,31 @@ def process(
         window_size_nano,
         window_size_nano,
         num_windows_prefetch=100,
-        cached_windows_per_source=10,
-        shuffle=True,
+        # cached_windows_per_source=20,
+        shuffle=False,
     )
 
-    return process_pat(itr, device, sdk)
+    return itr
 
 
 if __name__ == "__main__":
 
-    local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
-    local_dataset = "/mnt/datasets/ians_data_2024_06_12"
+    # local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
+    # local_dataset = "/mnt/datasets/ians_data_2024_06_12"
+
+    # Newest dataset with Philips measures (SBP, DBP, MAP) (incomplete, 90%)
+    local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    num_cores = 10  # len(devices)
+    itr = make_device_itr(sdk, 80)
+    process_pat(sdk, 80, itr)
 
-    process(local_dataset, 80)
-    # exit()
+    exit()
+
+    num_cores = 10  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
@@ -178,3 +160,19 @@ if __name__ == "__main__":
             print(f.result())
 
     print("Finished processing")
+
+    measure_tag_list = [
+        "MDC_PULS_OXIM_PLETH",  # PPG
+        "MDC_ECG_ELEC_POTL_II",  # ECG II
+        "MDC_PRESS_BLD_ART",  # ABP I
+        "MDC_PRESS_BLD_ART_ABP",  # ABP II
+        "MDC_ECG_CARD_BEAT_RATE",  # ECG HR
+        "MDC_PLETH_PULS_RATE",  # PPG HR
+        "MDC_PULS_RATE",  # PPG HR
+        "MDC_PRESS_BLD_ART_ABP_MEAN",
+        "MDC_PRESS_BLD_ART_ABP_SYS",
+        "MDC_PRESS_BLD_ART_ABP_DIA",
+        "MDC_PRESS_BLD_ART_MEAN",
+        "MDC_PRESS_BLD_ART_SYS",
+        "MDC_PRESS_BLD_ART_DIA",
+    ]

@@ -1,3 +1,4 @@
+import warnings
 from dataclasses import dataclass, field
 
 import heartpy as hp
@@ -7,10 +8,9 @@ import numpy as np
 from atriumdb import AtriumSDK
 from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
+from plotting import plot_pat, plot_pat_hist
 from scipy.linalg import norm
 from scipy.spatial import distance
-
-from plotting import plot_pat, plot_pat_hist
 
 
 def peak_detect(signal_times, signal_values, freq_hz):
@@ -51,17 +51,19 @@ def rpeak_detect_fast(signal_times, signal_values, freq_hz):
     try:
         clean_signal = nk.ecg_clean(signal_values, sampling_rate=int(freq_hz))
         signals, info = nk.ecg_peaks(clean_signal, sampling_rate=int(freq_hz))
+
+        peak_indices = info["ECG_R_Peaks"]
+
+        # Correct Peaks
+        (corrected_peak_indices,) = ecg.correct_rpeaks(
+            signal=signal_values, rpeaks=peak_indices, sampling_rate=freq_hz
+        )
+
+        return signal_times[corrected_peak_indices]
+
     except Exception as e:
         print(f"Error: {e}")
-
-    peak_indices = info["ECG_R_Peaks"]
-
-    # Correct Peaks
-    (corrected_peak_indices,) = ecg.correct_rpeaks(
-        signal=signal_values, rpeaks=peak_indices, sampling_rate=freq_hz
-    )
-
-    return signal_times[corrected_peak_indices]
+        return np.array([])
 
 
 def closest_argmin(x, y):
@@ -76,7 +78,7 @@ def closest_argmin(x, y):
     return np.array(z.argmin(axis=-1)).astype(int)
 
 
-def get_quality_index(signal, threshold=50):
+def get_quality_index(signal, min_hr=40, max_hr=300, diff_threshold=50):
     """
     Get quality of signal based on the interbeat intervals and change in HR
 
@@ -96,9 +98,9 @@ def get_quality_index(signal, threshold=50):
     delta_hr = np.diff(hr)
 
     # Get quality index
-    quality = np.absolute(delta_hr) < threshold
+    quality = np.absolute(delta_hr) < diff_threshold
 
-    return quality, hr
+    return quality
 
 
 @dataclass
@@ -122,19 +124,22 @@ def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
     """
 
     # Precalculate quality index for entire PPG signal
-    ppg_quality, hr = get_quality_index(ppg_peak_times)
+    ppg_quality = get_quality_index(ppg_peak_times)
 
     matching_peaks = list()
 
-    for i in range(ecg_peak_times.size - wsize - ssize):
+    for i in range(ecg_peak_times.size - wsize):
 
         # Find nearest time in ppg after ecg peak to start search
-        idx = np.where(ppg_peak_times > ecg_peak_times[i])[0][0]
+        try:
+            idx = np.where(ppg_peak_times > ecg_peak_times[i])[0][0]
+        except:
+            # No corresponding peak in PPG signal (likely at end of window)
+            continue
 
         # Signal quality passed and within idx bounds for search
         if (
-            idx + wsize + ssize
-            < ppg_peak_times.size
+            idx + wsize + ssize < ppg_peak_times.size
             and ppg_quality[idx : idx + wsize + ssize].all()
         ):
 
@@ -150,53 +155,85 @@ def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
                     for j in range(ssize)
                 ]
             )
+            best_match = np.argmin(euclidean)
 
-            m_peak = MatchedPeak(i, idx, euclidean, np.argmin(euclidean))
+            m_peak = MatchedPeak(i, idx, euclidean, best_match)
             matching_peaks.append(m_peak)
 
     return matching_peaks
 
 
-def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=1.300, expected=1.2):
+def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.400):
     """
-    Calculate PAT
+    Calculate Pulse Arrival Time
 
     :param ecg: ECG signal
     :param ecg_freq: Frequency of ECG signal
     :param ppg: PPG signal
     :param ppg_freq: Frequency of PPG signal
     :param pat_range: Range PAT can deviate from median within window (seconds)
+    :param ssize: Number of peaks to search ahead
 
     :return: Array of PAT
     """
 
-    # Assert no nans in signal values (Causes peak detection to fail)
-    # assert not np.isnan(ecg["values"]).any() == "ECG has NaNs"
-    # assert not np.isnan(ppg["values"]).any() == "PPG has NaNs"
+    # Find peaks in ECG and PPG signals
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
+        ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-    ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-    ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
+    assert ecg_peak_times.size > 0, "No ECG peaks found"
+    assert ppg_peak_times.size > 0, "No PPG peaks found"
 
+    # Match ppg peaks to ecg peaks
     ssize = 6
     matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times, ssize=ssize)
+
+    # Calculate PAT for each matched peak
     pats = list()
-
+    naive_pats = list()
     for m in matching_peaks:
-        pat = ppg_peak_times[m.nearest_ppg_peak + m.n_peaks] - ecg_peak_times[m.ecg_peak]
-        pats.append((m.ecg_peak, pat))
+        pat = (
+            ppg_peak_times[m.nearest_ppg_peak + m.n_peaks] - ecg_peak_times[m.ecg_peak]
+        )
+        pats.append((ecg_peak_times[m.ecg_peak], pat))
 
-    # for m in matching_peaks:
-    #     best = 0
-    #     for s in range(ssize):
-    #         pat = ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
-    #
-    #         if abs(pat - expected) < abs(best - expected):
-    #             best = pat
-    #
-    #     if expected - pat_range < best < expected + pat_range:
-    #         pats.append((m.ecg_peak, best))
+        naive_pats.append(
+            ppg_peak_times[m.nearest_ppg_peak] - ecg_peak_times[m.ecg_peak]
+        )
 
-    return np.array(pats), ecg_peak_times, ppg_peak_times
+    pats = np.array(pats)
+    naive_pats = np.array(naive_pats)
+
+    # Use median as expected value to correct outliers (i.e. mismatched beats)
+    expected = np.median(pats[:, 1])
+
+    # Correct outliers
+    num_corrected = 0
+
+    for i, pat in enumerate(pats[:, 1]):
+
+        # PAT outside expected range, correct it
+        if pat < expected - pat_range or pat > expected + pat_range:
+
+            m = matching_peaks[i]
+
+            best = 0
+            for s in range(ssize):
+                pat = (
+                    ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
+                )
+
+                # Best PAT is selected as closest to expected value over search
+                if abs(pat - expected) < abs(best - expected):
+                    best = pat
+
+            if expected - pat_range < best < expected + pat_range:
+                pats[i, 1] = best
+                num_corrected += 1
+
+    return pats, naive_pats, num_corrected
 
 
 def calc_pat_abp(ecg, ecg_freq, abp, abp_freq):
@@ -225,7 +262,7 @@ def naive_calculate_pat(ecg, ecg_freq, ppg, ppg_freq):
     """
 
     ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-    ppg_peak_times= peak_detect(ppg["times"], ppg["values"], ppg_freq)
+    ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
     times = closest_argmin(ecg_peak_times, ppg_peak_times)
 

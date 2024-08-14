@@ -111,7 +111,9 @@ class MatchedPeak:
     n_peaks: int = np.nan
 
 
-def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
+def get_matching_peaks(
+    ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_time=1
+):
     """
     Align peaks from ECG and PPG signals
 
@@ -130,9 +132,12 @@ def get_matching_peaks(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6):
 
     for i in range(ecg_peak_times.size - wsize):
 
-        # Find nearest time in ppg after ecg peak to start search
+        # Find nearest time in ppg after ecg peak to start search, within limit
         try:
-            idx = np.where(ppg_peak_times > ecg_peak_times[i])[0][0]
+            idx = np.where(
+                (ppg_peak_times > ecg_peak_times[i])
+                & (ppg_peak_times - ecg_peak_times[i] < max_search_time)
+            )[0][0]
         except:
             # No corresponding peak in PPG signal (likely at end of window)
             continue
@@ -191,28 +196,34 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.400):
     matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times, ssize=ssize)
 
     # Calculate PAT for each matched peak
-    pats = list()
-    naive_pats = list()
+    pats = {"times": list(), "values": list()}
+    naive_pats = {"times": list(), "values": list()}
+
     for m in matching_peaks:
         pat = (
             ppg_peak_times[m.nearest_ppg_peak + m.n_peaks] - ecg_peak_times[m.ecg_peak]
         )
-        pats.append((ecg_peak_times[m.ecg_peak], pat))
 
-        naive_pats.append(
+        pats["times"].append(ecg_peak_times[m.ecg_peak])
+        pats["values"].append(pat)
+
+        naive_pats["times"].append(ecg_peak_times[m.ecg_peak])
+        naive_pats["values"].append(
             ppg_peak_times[m.nearest_ppg_peak] - ecg_peak_times[m.ecg_peak]
         )
 
-    pats = np.array(pats)
-    naive_pats = np.array(naive_pats)
+    pats["times"] = np.array(pats["times"])
+    pats["values"] = np.array(pats["values"])
+    naive_pats["times"] = np.array(naive_pats["times"])
+    naive_pats["values"] = np.array(naive_pats["values"])
 
     # Use median as expected value to correct outliers (i.e. mismatched beats)
-    expected = np.median(pats[:, 1])
+    expected = np.median(pats["values"])
 
     # Correct outliers
     num_corrected = 0
 
-    for i, pat in enumerate(pats[:, 1]):
+    for i, pat in enumerate(pats["values"]):
 
         # PAT outside expected range, correct it
         if pat < expected - pat_range or pat > expected + pat_range:
@@ -230,7 +241,7 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.400):
                     best = pat
 
             if expected - pat_range < best < expected + pat_range:
-                pats[i, 1] = best
+                pats["values"][i] = best
                 num_corrected += 1
 
     return pats, naive_pats, num_corrected

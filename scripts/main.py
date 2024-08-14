@@ -9,6 +9,7 @@ from data_quality import DataValidator
 from pat import calclulate_pat
 from plotting import plot_pat, plot_pat_hist
 from tqdm import tqdm
+from utils.atriumdb_helpers import make_device_itr, print_all_measures
 
 
 def process_pat(sdk, dev, itr):
@@ -23,36 +24,44 @@ def process_pat(sdk, dev, itr):
     """
 
     results = {}
-    total_corrected = 0
 
     # Progress bar
     pbar = tqdm(total=itr._length, desc="Processing Windows")
 
     for i, w in enumerate(itr):
+
+        if not w.patient_id:
+            print("No patient ID")
+            continue
+
         # Check if patient exists in results
         if w.patient_id not in results.keys():
             # Get patient date of birth
+
             dob = pd.to_datetime(sdk.get_patient_info(w.patient_id)["dob"])
 
             results[w.patient_id] = {
+                "dob": dob,
                 "times": np.array([]),
                 "pat": np.array([]),
                 "naive_pat": np.array([]),
-                "dob": dob,
+                "total_corrected": 0,
+                "failed_windows": 0,
             }
 
         # Extract specific signals and convert timescale
         ecg, ecg_freq = [(v, k[1]) for k, v in w.signals.items() if "ECG" in k[0]][0]
         ppg, ppg_freq = [(v, k[1]) for k, v in w.signals.items() if "PULS" in k[0]][0]
+        sbp = [v for k, v in w.signals.items() if "SYS" in k[0]][0]
 
         ecg["times"] = ecg["times"] / 10**9
         ppg["times"] = ppg["times"] / 10**9
+        sbp["times"] = sbp["times"] / 10**9
 
         try:
             pats, naive_pats, corrected = calclulate_pat(ecg, ecg_freq, ppg, ppg_freq)
 
-            total_corrected += corrected
-
+            results[w.patient_id]["total_corrected"] += corrected
             results[w.patient_id]["times"] = np.concatenate(
                 (results[w.patient_id]["times"], pats[:, 0])
             )
@@ -65,6 +74,7 @@ def process_pat(sdk, dev, itr):
 
         except Exception as e:
             print(f"Error in calculating PAT: {e}")
+            results[w.patient_id]["failed_windows"] += 1
             continue
 
         pbar.update(1)
@@ -72,10 +82,8 @@ def process_pat(sdk, dev, itr):
     np.save(f"../data/results/device{dev}_pats.npy", results)
     print(f"Finished processing device {dev}")
 
-    return results
 
-
-def make_device_itr(
+def old_make_device_itr(
     sdk,
     device,
     window_size_nano=60 * 20 * (10**9),
@@ -133,6 +141,17 @@ def make_device_itr(
     return itr
 
 
+def run(local_dataset, device):
+    """
+    Function to run in parallel
+    """
+    sdk = AtriumSDK(dataset_location=local_dataset)
+    itr = make_device_itr(sdk, device)
+    process_pat(sdk, device, itr)
+
+    return True
+
+
 if __name__ == "__main__":
 
     # local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
@@ -142,37 +161,25 @@ if __name__ == "__main__":
     local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
+
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    itr = make_device_itr(sdk, 80)
+    # Pleth, ECG, ABP, SYS
+    measures = [2, 3, 4, 15]
+
+    itr = make_device_itr(sdk, 80, measure_ids=measures)
     process_pat(sdk, 80, itr)
 
     exit()
 
-    num_cores = 10  # len(devices)
+    num_cores = 20  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
-        futures = {pp.submit(process, local_dataset, d): d for d in devices}
+        futures = {pp.submit(run, local_dataset, d): d for d in devices}
 
         for f in concurrent.futures.as_completed(futures):
             print(f.result())
 
     print("Finished processing")
-
-    measure_tag_list = [
-        "MDC_PULS_OXIM_PLETH",  # PPG
-        "MDC_ECG_ELEC_POTL_II",  # ECG II
-        "MDC_PRESS_BLD_ART",  # ABP I
-        "MDC_PRESS_BLD_ART_ABP",  # ABP II
-        "MDC_ECG_CARD_BEAT_RATE",  # ECG HR
-        "MDC_PLETH_PULS_RATE",  # PPG HR
-        "MDC_PULS_RATE",  # PPG HR
-        "MDC_PRESS_BLD_ART_ABP_MEAN",
-        "MDC_PRESS_BLD_ART_ABP_SYS",
-        "MDC_PRESS_BLD_ART_ABP_DIA",
-        "MDC_PRESS_BLD_ART_MEAN",
-        "MDC_PRESS_BLD_ART_SYS",
-        "MDC_PRESS_BLD_ART_DIA",
-    ]

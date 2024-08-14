@@ -5,6 +5,7 @@
 *.jpg
 *.yaml
 *venv*
+*.whl
 data
 
 # Byte-compiled / optimized / DLL files

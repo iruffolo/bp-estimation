@@ -78,7 +78,7 @@ def closest_argmin(x, y):
     return np.array(z.argmin(axis=-1)).astype(int)
 
 
-def get_quality_index(signal, min_hr=40, max_hr=300, diff_threshold=50):
+def get_quality_index(signal, min_hr=30, max_hr=300, diff_threshold=40):
     """
     Get quality of signal based on the interbeat intervals and change in HR
 
@@ -98,8 +98,10 @@ def get_quality_index(signal, min_hr=40, max_hr=300, diff_threshold=50):
     delta_hr = np.diff(hr)
 
     # Get quality index
-    quality = np.absolute(delta_hr) < diff_threshold
+    dt_quality = np.absolute(delta_hr) < diff_threshold
+    hr_quality = (min_hr < hr) & (hr < max_hr)
 
+    quality = dt_quality & hr_quality[:-1]
     return quality
 
 

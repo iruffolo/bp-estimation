@@ -170,7 +170,7 @@ def get_matching_peaks(
     return matching_peaks
 
 
-def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.400):
+def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.100):
     """
     Calculate Pulse Arrival Time
 
@@ -198,53 +198,64 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.400):
     matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times, ssize=ssize)
 
     # Calculate PAT for each matched peak
-    pats = {"times": list(), "values": list()}
-    naive_pats = {"times": list(), "values": list()}
+    pats = {
+        "times": np.zeros([len(matching_peaks)]),
+        "values": np.zeros([len(matching_peaks)]),
+    }
+    naive_pats = {
+        "times": np.zeros([len(matching_peaks)]),
+        "values": np.zeros([len(matching_peaks)]),
+    }
 
-    for m in matching_peaks:
+    for i, m in enumerate(matching_peaks):
         pat = (
             ppg_peak_times[m.nearest_ppg_peak + m.n_peaks] - ecg_peak_times[m.ecg_peak]
         )
 
-        pats["times"].append(ecg_peak_times[m.ecg_peak])
-        pats["values"].append(pat)
-
-        naive_pats["times"].append(ecg_peak_times[m.ecg_peak])
-        naive_pats["values"].append(
+        pats["times"][i] = ecg_peak_times[m.ecg_peak]
+        pats["values"][i] = pat
+        naive_pats["times"][i] = ecg_peak_times[m.ecg_peak]
+        naive_pats["values"][i] = (
             ppg_peak_times[m.nearest_ppg_peak] - ecg_peak_times[m.ecg_peak]
         )
-
-    pats["times"] = np.array(pats["times"])
-    pats["values"] = np.array(pats["values"])
-    naive_pats["times"] = np.array(naive_pats["times"])
-    naive_pats["values"] = np.array(naive_pats["values"])
 
     # Use median as expected value to correct outliers (i.e. mismatched beats)
     expected = np.median(pats["values"])
 
-    # Correct outliers
     num_corrected = 0
+    tobedeleted = list()
 
     for i, pat in enumerate(pats["values"]):
 
         # PAT outside expected range, correct it
-        if pat < expected - pat_range or pat > expected + pat_range:
+        if not (expected - pat_range < pat < expected + pat_range):
 
             m = matching_peaks[i]
 
             best = 0
             for s in range(ssize):
-                pat = (
+                new_pat = (
                     ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
                 )
 
                 # Best PAT is selected as closest to expected value over search
-                if abs(pat - expected) < abs(best - expected):
-                    best = pat
+                if abs(new_pat - expected) < abs(best - expected):
+                    best = new_pat
 
             if expected - pat_range < best < expected + pat_range:
+                # print(f"Good correction {pat} -> {best}")
                 pats["values"][i] = best
                 num_corrected += 1
+
+            # Couldn't find a good enough correction, remove point
+            else:
+                # print(f"Cant find correction, destroying {pat}")
+                tobedeleted.append(i)
+
+    pats["times"] = np.delete(pats["times"], tobedeleted)
+    pats["values"] = np.delete(pats["values"], tobedeleted)
+    naive_pats["values"] = np.delete(naive_pats["times"], tobedeleted)
+    naive_pats["values"] = np.delete(naive_pats["values"], tobedeleted)
 
     return pats, naive_pats, num_corrected
 

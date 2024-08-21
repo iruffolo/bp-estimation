@@ -10,16 +10,26 @@ from scipy.stats import pearsonr, spearmanr
 from utils.atriumdb_helpers import get_all_patient_data, print_all_measures
 
 
+def _convert_to_np(data):
+    """
+    Convert every element in dict to np array
+    """
+
+    for key in data:
+        data[key] = np.array(data[key])
+
+    return data
+
+
 def create_aligned_data(pats, n_pats, times, bp, bp_lag=6, max_offset=10):
     """
     Align PAT data with BP data
     """
 
-    print(f"Creating aligned data with offset: {bp_lag}s")
-    synced = []
+    # print(f"Creating aligned data with offset: {bp_lag}s")
+    synced = {"times": [], "pats": [], "naive_pats": [], "bp": []}
 
     for i, (pat, n_pat, t) in enumerate(zip(pats, n_pats, times)):
-
         try:
             idx = np.where(
                 (bp["times"] - bp_lag >= t) & (bp["times"] - t < max_offset)
@@ -29,7 +39,10 @@ def create_aligned_data(pats, n_pats, times, bp, bp_lag=6, max_offset=10):
             if np.isnan(pat) or np.isnan(bp["values"][idx]):
                 continue
 
-            synced.append((t, pat, n_pat, bp["values"][idx]))
+            synced["times"].append(t)
+            synced["pats"].append(pat)
+            synced["naive_pats"].append(n_pat)
+            synced["bp"].append(bp["values"][idx])
 
             # print(f"Pat: {pat}, time: {t}")
             # print(f"BP times: {bp['times'][idx]}")
@@ -38,12 +51,12 @@ def create_aligned_data(pats, n_pats, times, bp, bp_lag=6, max_offset=10):
 
         except IndexError:
             print(f"Failed to align pat, missing BP data for pat {i}")
-            return np.array(synced)
+            return _convert_to_np(synced)
         except Exception as e:
             print(f"Failed to align pat: {e}")
-            return np.array(synced)
+            return _convert_to_np(synced)
 
-    return np.array(synced)
+    return _convert_to_np(synced)
 
 
 def calc_correlation(synced):

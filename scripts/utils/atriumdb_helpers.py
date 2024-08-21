@@ -58,7 +58,7 @@ def make_patient_itr(
     sdk,
     patient_id,
     window_size_nano=60 * 20 * (10**9),
-    gap_tol_nano=0.3 * (10**9),
+    gap_tol_nano=5 * (10**9),
 ):
     """
     Creates new SDK instance and iterator for a specific device
@@ -106,8 +106,8 @@ def make_patient_itr(
 def make_device_itr(
     sdk,
     device,
-    window_size_nano=60 * 20 * (10**9),
-    gap_tol_nano=0.3 * (10**9),
+    window_size_nano=60 * 30 * (10**9),
+    gap_tol_nano=5 * (10**9),
     measure_ids=None,
 ):
     """

@@ -78,7 +78,7 @@ def closest_argmin(x, y):
     return np.array(z.argmin(axis=-1)).astype(int)
 
 
-def get_quality_index(signal, min_hr=30, max_hr=300, diff_threshold=40):
+def get_quality_index(signal, min_hr=20, max_hr=300, diff_threshold=50):
     """
     Get quality of signal based on the interbeat intervals and change in HR
 
@@ -170,7 +170,7 @@ def get_matching_peaks(
     return matching_peaks
 
 
-def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.100):
+def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.150):
     """
     Calculate Pulse Arrival Time
 
@@ -190,8 +190,8 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.100):
         ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
         ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-    assert ecg_peak_times.size > 0, "No ECG peaks found"
-    assert ppg_peak_times.size > 0, "No PPG peaks found"
+    assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
+    assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
 
     # Match ppg peaks to ecg peaks
     ssize = 6
@@ -254,7 +254,7 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.100):
 
     pats["times"] = np.delete(pats["times"], tobedeleted)
     pats["values"] = np.delete(pats["values"], tobedeleted)
-    naive_pats["values"] = np.delete(naive_pats["times"], tobedeleted)
+    naive_pats["times"] = np.delete(naive_pats["times"], tobedeleted)
     naive_pats["values"] = np.delete(naive_pats["values"], tobedeleted)
 
     return pats, naive_pats, num_corrected

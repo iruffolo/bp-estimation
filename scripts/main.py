@@ -1,4 +1,5 @@
 import concurrent.futures
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -130,11 +131,11 @@ def process_pat(sdk, dev, itr):
                     "std_sbp": np.std(synced["bp"]),
                     "mean_sbp": np.mean(synced["bp"]),
                     "median_sbp": np.median(synced["bp"]),
-                    "max_hr": np.max(hr["values"]),
-                    "min_hr": np.min(hr["values"]),
-                    "std_hr": np.std(hr["values"]),
-                    "mean_hr": np.mean(hr["values"]),
-                    "median_hr": np.median(hr["values"]),
+                    "max_hr": np.nanmax(hr["values"]),
+                    "min_hr": np.nanmin(hr["values"]),
+                    "std_hr": np.nanstd(hr["values"]),
+                    "mean_hr": np.nanmean(hr["values"]),
+                    "median_hr": np.nanmedian(hr["values"]),
                 }
             )
             print(window_results[-1])
@@ -186,17 +187,6 @@ def process_pat(sdk, dev, itr):
             # f2 = Polynomial.fit(synced["naive_pats"], synced["bp"], 1)
             # xx, yy = f1.linspace()
 
-            # fig, ax = plt.subplots(2, figsize=(15, 10))
-            # ax[0].plot(synced["pats"], synced["bp"], ".")
-            # ax[0].plot(synced["pats"], y1)
-            # ax[0].set_title(f"Corrected Pats ({f1})")
-            # ax[1].plot(synced["naive_pats"], synced["bp"], ".")
-            # ax[1].plot(synced["naive_pats"], y2)
-            # ax[1].set_title(f"Naive Pats ({f2})")
-            # plt.tight_layout()
-            # plt.show()
-            # plt.savefig(f"plots/corr/{w.device_id}_{w.patient_id}")
-
             # fig, ax = plot_waveforms(ecg, ppg, abp, pats["times"], corrected_pat)
             # ax[2].plot(sbp["times"], sbp["values"])
             # ax[3].plot(naive_pats["times"], naive_pats["values"], ".")
@@ -208,16 +198,19 @@ def process_pat(sdk, dev, itr):
         # if i > 50:
         #     break
 
-    # if file does not exist write header
-    if not os.path.isfile("filename.csv"):
-        df.to_csv("filename.csv", header="column_names")
-    else:  # else it exists so append without writing the header
-        df.to_csv("filename.csv", mode="a", header=False)
+        if len(window_results) > 50:
+            df = pd.DataFrame(window_results)
+            fn = f"../data/results/slopes/{dev}.csv"
 
-    df = pd.DataFrame(window_results)
-    df.to_csv(f"../data/results/slopes/{dev}.csv", index=False)
+            # if file does not exist write header, else append
+            if not os.path.isfile(fn):
+                df.to_csv(fn, header="column_names", index=False)
+            else:
+                df.to_csv(fn, mode="a", header=False, index=False)
+
+            window_results.clear()
+
     # np.save(f"../data/results/device{dev}_pats.npy", results)
-
     np.save(f"../data/results/slopes/{dev}_runstats.npy", run_stats)
 
     print(f"Finished processing device {dev}")
@@ -253,14 +246,14 @@ if __name__ == "__main__":
 
     # Pleth, ECG, ABP, PULSE RATE, SYS
     measures = [2, 3, 4, 7, 15]
-    gap_tol = 5 * (10**9)  # 5s
     window_size = 60 * 30 * (10**9)  # 30 min
+    gap_tol = 5 * (10**9)  # 5s
 
-    itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
-    process_pat(sdk, 80, itr)
-    exit()
+    # itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
+    # process_pat(sdk, 80, itr)
+    # exit()
 
-    num_cores = 20  # len(devices)
+    num_cores = 10  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 

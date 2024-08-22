@@ -95,7 +95,7 @@ def make_patient_itr(
         definition,
         window_size_nano,
         window_size_nano,
-        num_windows_prefetch=100,
+        num_windows_prefetch=10,
         # cached_windows_per_source=20,
         shuffle=False,
     )

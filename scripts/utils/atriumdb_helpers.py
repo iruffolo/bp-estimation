@@ -145,7 +145,7 @@ def make_device_itr(
         definition,
         window_size_nano,
         window_size_nano,
-        num_windows_prefetch=10,
+        num_windows_prefetch=100,
         # cached_windows_per_source=20,
         shuffle=False,
     )

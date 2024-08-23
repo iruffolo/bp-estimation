@@ -46,6 +46,7 @@ def process_pat(sdk, dev, itr):
 
         if not w.patient_id:
             print("No patient ID")
+            pbar.update(1)
             continue
 
         # # Check if patient exists in results
@@ -78,6 +79,7 @@ def process_pat(sdk, dev, itr):
             # Window has very sparse measurements, poor quality
             if pats["times"].size < 500:
                 run_stats["insufficient_pats"] += 1
+                pbar.update(1)
                 continue
 
             # Get Sawtooth and correct PATs
@@ -91,6 +93,7 @@ def process_pat(sdk, dev, itr):
 
             if synced["times"].size < 300:
                 run_stats["failed_alignment"] += 1
+                pbar.update(1)
                 continue
 
             # Get Correlation with SBP
@@ -99,13 +102,37 @@ def process_pat(sdk, dev, itr):
             s1 = spearmanr(synced["pats"], synced["bp"])
             s2 = spearmanr(synced["naive_pats"], synced["bp"])
 
+            # Line of best fit using RANSAC to deal with outliers
             r1 = linear_model.RANSACRegressor()
             r1.fit(synced["pats"].reshape(-1, 1), synced["bp"])
-            y1 = r1.predict(synced["pats"].reshape(-1, 1))
 
             r2 = linear_model.RANSACRegressor()
             r2.fit(synced["naive_pats"].reshape(-1, 1), synced["bp"])
-            y2 = r2.predict(synced["naive_pats"].reshape(-1, 1))
+
+            # Calculate medians for better lion of best fit
+            df = pd.DataFrame(synced)
+            medians = df.groupby(["bp"])["pats"].median().reset_index()
+            naive_medians = df.groupby(["bp"])["naive_pats"].median().reset_index()
+
+            # Line of best fit using RANSAC to deal with outliers
+            mr1 = linear_model.RANSACRegressor()
+            mr1.fit(medians["pats"].to_numpy().reshape(-1, 1), medians["bp"])
+
+            # Line of best fit using RANSAC to deal with outliers
+            mr2 = linear_model.RANSACRegressor()
+            mr2.fit(
+                naive_medians["naive_pats"].to_numpy().reshape(-1, 1),
+                naive_medians["bp"],
+            )
+
+            # y1 = r1.predict(synced["pats"].reshape(-1, 1))
+            # y2 = r2.predict(synced["naive_pats"].reshape(-1, 1))
+            # my1 = mr1.predict(synced["pats"].reshape(-1, 1))
+            # my2 = mr2.predict(synced["naive_pats"].reshape(-1, 1))
+
+            # Line of best fit using Polyfit
+            # f1 = Polynomial.fit(synced["pats"], synced["bp"], 1)
+            # xx, yy = f1.linspace()
 
             window_results.append(
                 {
@@ -118,12 +145,16 @@ def process_pat(sdk, dev, itr):
                     "mean_pats": np.mean(synced["pats"]),
                     "slope": r1.estimator_.coef_[0],
                     "intercept": r1.estimator_.intercept_,
+                    "median_slope": mr1.estimator_.coef_[0],
+                    "median_intercept": mr1.estimator_.intercept_,
                     "pearson": p1.statistic,
                     "spearman": s1.correlation,
                     "naive_std_pats": np.std(synced["naive_pats"]),
                     "naive_mean_pats": np.mean(synced["naive_pats"]),
                     "naive_slope": r2.estimator_.coef_[0],
                     "naive_intercept": r2.estimator_.intercept_,
+                    "naive_median_slope": mr2.estimator_.coef_[0],
+                    "naive_median_intercept": mr2.estimator_.intercept_,
                     "naive_pearson": p2.statistic,
                     "naive_spearman": s2.correlation,
                     "max_sbp": np.max(synced["bp"]),
@@ -142,21 +173,57 @@ def process_pat(sdk, dev, itr):
             run_stats["successful"] += 1
 
             # fig, ax = plt.subplots(2, figsize=(15, 10))
-            # ax[0].plot(synced["pats"], synced["bp"], ".")
-            # ax[0].plot(synced["pats"], y1)
-            # ax[0].set_title(
-            #     f"Corrected Pats ({r1.estimator_.intercept_} {r1.estimator_.coef_[0]}x)"
+            # ax[0].plot(synced["pats"], synced["bp"], ".", alpha=0.5)
+            # ax[0].plot(
+            #     medians["pats"], medians["bp"], "ro", markersize=6, label="Medians"
             # )
+            # ax[0].plot(
+            #     synced["pats"],
+            #     y1,
+            #     label=f"Points Line ({r1.estimator_.intercept_} {r1.estimator_.coef_[0]}x)",
+            # )
+            # ax[0].plot(
+            #     synced["pats"],
+            #     my1,
+            #     label=f"Medians Line ({mr1.estimator_.intercept_} {mr1.estimator_.coef_[0]}x)",
+            # )
+            # ax[0].set_title(f"Corrected Pats")
             # ax[0].set_xlim(0, 2)
-            # ax[1].plot(synced["naive_pats"], synced["bp"], ".")
-            # ax[1].plot(synced["naive_pats"], y2)
+            # ax[0].legend(loc="upper left")
+            # ax[0].set_xlabel("PAT (s)")
+            # ax[0].set_ylabel("BP (mmHG)")
+            # # ax[0].grid()
+            # ax[1].plot(synced["naive_pats"], synced["bp"], ".", alpha=0.5)
+            # ax[1].plot(
+            #     naive_medians["naive_pats"],
+            #     naive_medians["bp"],
+            #     "ro",
+            #     markersize=5,
+            #     label="Medians",
+            # )
+            # ax[1].plot(
+            #     synced["naive_pats"],
+            #     y2,
+            #     label=f"Points Line ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)",
+            # )
+            # ax[1].plot(
+            #     synced["naive_pats"],
+            #     my2,
+            #     label=f"Medians Line ({mr2.estimator_.intercept_} {mr2.estimator_.coef_[0]}x)",
+            # )
             # ax[1].set_title(
             #     f"Naive Pats ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)"
             # )
             # ax[1].set_xlim(0, 2)
+            # ax[1].legend(loc="upper right")
+            # ax[1].set_xlabel("PAT (s)")
+            # ax[1].set_ylabel("BP (mmHG)")
+            # # ax[1].grid()
+
             # plt.tight_layout()
-            # plt.show()
-            # plt.savefig(f"plots/corr/{w.device_id}_{w.patient_id}")
+            # # plt.show()
+            # plt.savefig(f"plots/slopes/{w.device_id}_{w.patient_id}")
+            # plt.close()
 
         # Peak detection faliled to detect enough peaks in calculate_pat
         except AssertionError as e:
@@ -165,6 +232,8 @@ def process_pat(sdk, dev, itr):
                 run_stats["poor_ecg_quality"] += 1
             if "PPG" in str(e):
                 run_stats["poor_ppg_quality"] += 1
+            else:
+                run_stats["unexpected_failed"] += 1
 
             # # Debug plot
             # fig, ax = plt.subplots(3, figsize=(15, 10), sharex=True)
@@ -189,19 +258,9 @@ def process_pat(sdk, dev, itr):
             #     (results[w.patient_id]["naive_pat"], naive_pats)
             # )
 
-            # results[w.patient_id]["successful_windows"] += 1
-            # f1 = Polynomial.fit(synced["pats"], synced["bp"], 1)
-            # f2 = Polynomial.fit(synced["naive_pats"], synced["bp"], 1)
-            # xx, yy = f1.linspace()
-
-        pbar.update(1)
-
-        # if i > 50:
-        #     break
-
         if len(window_results) > 50:
             df = pd.DataFrame(window_results)
-            fn = f"../data/results/slopes/{dev}.csv"
+            fn = f"../data/results/median_slopes/{dev}.csv"
 
             # if file does not exist write header, else append
             if not os.path.isfile(fn):
@@ -210,6 +269,11 @@ def process_pat(sdk, dev, itr):
                 df.to_csv(fn, mode="a", header=False, index=False)
 
             window_results.clear()
+
+        pbar.update(1)
+
+        if i > 200:
+            break
 
     # np.save(f"../data/results/device{dev}_pats.npy", results)
     np.save(f"../data/results/slopes/{dev}_runstats.npy", run_stats)
@@ -250,9 +314,9 @@ if __name__ == "__main__":
     window_size = 60 * 30 * (10**9)  # 30 min
     gap_tol = 5 * (10**9)  # 5s
 
-    itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
-    process_pat(sdk, 80, itr)
-    exit()
+    # itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
+    # process_pat(sdk, 80, itr)
+    # exit()
 
     num_cores = 10  # len(devices)
 

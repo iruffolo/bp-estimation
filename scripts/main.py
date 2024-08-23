@@ -166,6 +166,13 @@ def process_pat(sdk, dev, itr):
             if "PPG" in str(e):
                 run_stats["poor_ppg_quality"] += 1
 
+            # # Debug plot
+            # fig, ax = plt.subplots(3, figsize=(15, 10), sharex=True)
+            # ax[0].plot(abp["times"], abp["values"])
+            # ax[1].plot(ecg["times"], ecg["values"])
+            # ax[2].plot(ppg["times"], ppg["values"])
+            # plt.show()
+
         except Exception as e:
             print("Unexpected failure")
             print(e)
@@ -186,12 +193,6 @@ def process_pat(sdk, dev, itr):
             # f1 = Polynomial.fit(synced["pats"], synced["bp"], 1)
             # f2 = Polynomial.fit(synced["naive_pats"], synced["bp"], 1)
             # xx, yy = f1.linspace()
-
-            # fig, ax = plot_waveforms(ecg, ppg, abp, pats["times"], corrected_pat)
-            # ax[2].plot(sbp["times"], sbp["values"])
-            # ax[3].plot(naive_pats["times"], naive_pats["values"], ".")
-            # plt.tight_layout()
-            # plt.show()
 
         pbar.update(1)
 
@@ -233,10 +234,10 @@ if __name__ == "__main__":
     # local_dataset = "/mnt/datasets/ians_data_2024_06_12"
 
     # Newest dataset with Philips measures (SBP, DBP, MAP) (incomplete, 90%)
-    local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
+    # local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
 
     # New dataset - not tested
-    # local_dataset = "/mnt/datasets/ian_dataset_2024_08_14"
+    local_dataset = "/mnt/datasets/ian_dataset_2024_08_15"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     print_all_measures(sdk)
@@ -249,9 +250,9 @@ if __name__ == "__main__":
     window_size = 60 * 30 * (10**9)  # 30 min
     gap_tol = 5 * (10**9)  # 5s
 
-    # itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
-    # process_pat(sdk, 80, itr)
-    # exit()
+    itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
+    process_pat(sdk, 80, itr)
+    exit()
 
     num_cores = 10  # len(devices)
 

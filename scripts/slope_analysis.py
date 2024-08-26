@@ -5,11 +5,11 @@ import numpy as np
 import pandas as pd
 
 
-def add_grid(ax, min, max):
+def add_grid(ax, min, max, step):
 
     # Major ticks every 20, minor ticks every 5
-    major_ticks = np.arange(min, max + 1, 20)
-    minor_ticks = np.arange(min, max + 1, 5)
+    major_ticks = np.arange(min, max + 1, step)
+    minor_ticks = np.arange(min, max + 1, step / 4)
 
     ax.set_xlim(min, max)
     ax.set_xticks(major_ticks)
@@ -25,26 +25,32 @@ def add_grid(ax, min, max):
     ax.grid(which="major", alpha=0.9)
 
 
-def plot_slope(df):
+def plot_slope(df, metric):
 
     fig, ax = plt.subplots(2, figsize=(15, 10))
 
-    ax[0].hist(df["slope"], bins=5000)
+    bins = int(len(df[metric]) / 20)
+
+    thresh = 5000
+
+    ax[0].hist(df[metric][abs(df[metric]) < thresh], bins=bins)
     ax[0].set_title("Corrected PAT vs SBP Slopes")
     ax[0].set_xlabel("Slope")
     ax[0].set_ylabel("Count")
+    add_grid(ax[0], -4000, 4000, 1000)
 
-    ax[1].hist(df["naive_slope"], bins=5000)
+    ax[1].hist(df[f"naive_{metric}"][abs(df[f"naive_{metric}"]) < thresh], bins=bins)
     ax[1].set_title("Naive PAT vs SBP Slopes")
     ax[1].set_xlabel("Slope")
     ax[1].set_ylabel("Count")
+    add_grid(ax[1], -4000, 4000, 1000)
 
-    min, max = -60, 60
-    add_grid(ax[0], min, max)
-    add_grid(ax[1], min, max)
+    # add_grid(ax[0], -4000, 2000)
+    # add_grid(ax[1], -1000, 1000)
 
     plt.tight_layout()
     plt.show()
+    plt.close()
 
 
 def plot_correlation(df, metric):
@@ -81,6 +87,7 @@ def plot_correlation(df, metric):
 
     plt.tight_layout()
     plt.show()
+    plt.close()
 
 
 def combine_results(path, write=True):
@@ -132,12 +139,12 @@ if __name__ == "__main__":
 
     print("Analysing")
 
-    path = "../data/results/slopes/"
+    path = "../data/results/median_slopes/"
 
     df = combine_results(path, False)
     print(len(df))
 
     # check_stats(path)
-    # plot_slope(df)
-    plot_correlation(df, "pearson")
-    plot_correlation(df, "spearman")
+    # plot_slope(df, "median_slope")
+    plot_correlation(df[:1000], "pearson")
+    # plot_correlation(df, "spearman")

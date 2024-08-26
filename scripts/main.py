@@ -15,7 +15,9 @@ from sawtooth import fit_sawtooth
 from scipy.stats import pearsonr, spearmanr
 from sklearn import linear_model
 from tqdm import tqdm
-from utils.atriumdb_helpers import make_device_itr, print_all_measures
+from utils.atriumdb_helpers import (make_device_itr,
+                                    make_device_itr_all_signals,
+                                    print_all_measures)
 
 
 def process_pat(sdk, dev, itr):
@@ -30,7 +32,7 @@ def process_pat(sdk, dev, itr):
     """
 
     # Progress bar
-    pbar = tqdm(total=itr._length, desc="Processing Windows")
+    pbar = tqdm(total=itr._length, desc=f"Processing Window Device {dev}")
 
     run_stats = {
         "successful": 0,
@@ -59,13 +61,13 @@ def process_pat(sdk, dev, itr):
         #     }
 
         # Extract specific signals and convert timescale
-        ecg, ecg_freq = [(v, k[1]) for k, v in w.signals.items() if "ECG" in k[0]][0]
+        ecg, ecg_freq = [(v, k[1]) for k, v in w.signals.items() if "ECG_ELEC" in k[0]][0]
         ppg, ppg_freq = [(v, k[1]) for k, v in w.signals.items() if "PULS" in k[0]][0]
         abp, abp_freq = [
-            (v, k[1]) for k, v in w.signals.items() if "MDC_PRESS_BLD_ART_ABP" == k[0]
+            (v, k[1]) for k, v in w.signals.items() if "MDC_PRESS_BLD_ART_ABP" == k[0] or "MDC_PRESS_BLD_ART" == k[0]
         ][0]
         sbp = [v for k, v in w.signals.items() if "SYS" in k[0]][0]
-        hr = [v for k, v in w.signals.items() if "PULS_RATE" in k[0]][0]
+        hr = [v for k, v in w.signals.items() if "BEAT_RATE" in k[0]][0]
 
         # Convert to seconds
         ecg["times"] = ecg["times"] / 10**9
@@ -109,30 +111,33 @@ def process_pat(sdk, dev, itr):
             r2 = linear_model.RANSACRegressor()
             r2.fit(synced["naive_pats"].reshape(-1, 1), synced["bp"])
 
-            # Calculate medians for better lion of best fit
+            # Calculate medians for better line of best fit
             df = pd.DataFrame(synced)
+            counts = df.groupby(["bp"]).size().reset_index(name="count")
+
             medians = df.groupby(["bp"])["pats"].median().reset_index()
+            medians["count"] = counts["count"]
             naive_medians = df.groupby(["bp"])["naive_pats"].median().reset_index()
+            naive_medians["count"] = counts["count"]
+
+            # Filter by minimum number of PAT points per BP value
+            medians = medians[medians["count"] > 50]
+            naive_medians = naive_medians[naive_medians["count"] > 50]
 
             # Line of best fit using RANSAC to deal with outliers
             mr1 = linear_model.RANSACRegressor()
             mr1.fit(medians["pats"].to_numpy().reshape(-1, 1), medians["bp"])
 
-            # Line of best fit using RANSAC to deal with outliers
             mr2 = linear_model.RANSACRegressor()
             mr2.fit(
                 naive_medians["naive_pats"].to_numpy().reshape(-1, 1),
                 naive_medians["bp"],
             )
 
-            # y1 = r1.predict(synced["pats"].reshape(-1, 1))
-            # y2 = r2.predict(synced["naive_pats"].reshape(-1, 1))
-            # my1 = mr1.predict(synced["pats"].reshape(-1, 1))
-            # my2 = mr2.predict(synced["naive_pats"].reshape(-1, 1))
-
-            # Line of best fit using Polyfit
-            # f1 = Polynomial.fit(synced["pats"], synced["bp"], 1)
-            # xx, yy = f1.linspace()
+            y1 = r1.predict(synced["pats"].reshape(-1, 1))
+            y2 = r2.predict(synced["naive_pats"].reshape(-1, 1))
+            my1 = mr1.predict(synced["pats"].reshape(-1, 1))
+            my2 = mr2.predict(synced["naive_pats"].reshape(-1, 1))
 
             window_results.append(
                 {
@@ -221,8 +226,8 @@ def process_pat(sdk, dev, itr):
             # # ax[1].grid()
 
             # plt.tight_layout()
-            # # plt.show()
-            # plt.savefig(f"plots/slopes/{w.device_id}_{w.patient_id}")
+            # plt.show()
+            # # plt.savefig(f"plots/slopes/{w.device_id}_{w.patient_id}")
             # plt.close()
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -272,21 +277,21 @@ def process_pat(sdk, dev, itr):
 
         pbar.update(1)
 
-        if i > 200:
-            break
+        # if i > 200:
+        #     break
 
     # np.save(f"../data/results/device{dev}_pats.npy", results)
-    np.save(f"../data/results/slopes/{dev}_runstats.npy", run_stats)
+    np.save(f"../data/results/median_slopes/{dev}_runstats.npy", run_stats)
 
     print(f"Finished processing device {dev}")
 
 
-def run(local_dataset, window_size, gap_tol, measures, device):
+def run(local_dataset, window_size, gap_tol, device):
     """
     Function to run in parallel
     """
     sdk = AtriumSDK(dataset_location=local_dataset)
-    itr = make_device_itr(sdk, device, window_size, gap_tol, measures)
+    itr = make_device_itr_all_signals(sdk, device, window_size, gap_tol)
     process_pat(sdk, device, itr)
 
     return True
@@ -309,12 +314,10 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    # Pleth, ECG, ABP, PULSE RATE, SYS
-    measures = [2, 3, 4, 7, 15]
-    window_size = 60 * 30 * (10**9)  # 30 min
-    gap_tol = 5 * (10**9)  # 5s
+    window_size = 60 * 60  # 60 min
+    gap_tol = 5  # 5s
 
-    # itr = make_device_itr(sdk, 80, window_size, gap_tol, measures)
+    # itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol)
     # process_pat(sdk, 80, itr)
     # exit()
 
@@ -323,8 +326,7 @@ if __name__ == "__main__":
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {
-            pp.submit(run, local_dataset, window_size, gap_tol, measures, d): d
-            for d in devices
+            pp.submit(run, local_dataset, window_size, gap_tol, d): d for d in devices
         }
 
         for f in concurrent.futures.as_completed(futures):

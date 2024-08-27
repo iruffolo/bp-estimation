@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from atriumdb import AtriumSDK
-from plotting import plot_pat_hist
 from sawtooth import fit_sawtooth
 from scipy.stats import pearsonr, spearmanr
 from utils.atriumdb_helpers import get_all_patient_data, print_all_measures

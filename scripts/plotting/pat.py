@@ -3,26 +3,6 @@ import numpy as np
 import seaborn as sns
 
 
-def rpeak_dist(ecg_peaks, freq):
-    """
-    Plot R-Peak IBI Distribution
-
-    :param ecg_peaks: ECG peaks
-    :param freq: Sampling frequency
-    """
-
-    diff = np.diff(ecg_peaks)
-
-    plt.hist(diff, bins=100)
-    plt.title("R-Peak IBI Distribution")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Frequency")
-    plt.show()
-    plt.savefig("plots/rpeak_ibi_dist")
-
-    return diff
-
-
 def plot_pat(
     ecg_data,
     ecg_peak_times,
@@ -131,34 +111,3 @@ def plot_pat_hist(pats, patient_id=0, device_id=0, show=True, save=True):
         plt.show()
 
     plt.close()
-
-
-def plot_waveforms(ecg, ppg, abp, patx, paty, show=False):
-    """
-    Plot all the raw data waveforms for debugging
-    """
-
-    fig, ax = plt.subplots(4, figsize=(15, 10), sharex=True)
-
-    ax[0].plot(ecg["times"], ecg["values"])
-    ax[0].set_title("ECG")
-    ax[0].set_xlabel("Time (s)")
-
-    ax[1].plot(ppg["times"], ppg["values"])
-    ax[1].set_title("PPG")
-    ax[1].set_xlabel("Time (s)")
-
-    ax[2].plot(abp["times"], abp["values"])
-    ax[2].set_title("ABP")
-    ax[2].set_xlabel("Time (s)")
-
-    ax[3].plot(patx, paty, ".")
-    ax[3].set_title("PAT")
-    ax[3].set_xlabel("Time (s)")
-
-    if show:
-        plt.tight_layout()
-        plt.show()
-        plt.close()
-
-    return fig, ax

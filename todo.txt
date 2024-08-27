@@ -1,0 +1,8 @@
+General Plots
+1. HR vs PAT plots for specific windows
+2. Breakdown by AGE for slopes
+
+Slopes
+1. Invert X/Y to recalculate
+2. Investigate single patients (week long stay) to see if there is a 
+    consistent regime within a single person

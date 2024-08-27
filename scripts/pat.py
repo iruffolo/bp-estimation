@@ -8,7 +8,7 @@ import numpy as np
 from atriumdb import AtriumSDK
 from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
-from plotting import plot_pat, plot_pat_hist
+from plotting.pat import plot_pat, plot_pat_hist
 from scipy.linalg import norm
 from scipy.spatial import distance
 

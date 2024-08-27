@@ -10,7 +10,7 @@ from correlation import create_aligned_data
 from data_quality import DataValidator
 from numpy.polynomial import Polynomial
 from pat import calclulate_pat
-from plotting import plot_pat, plot_pat_hist, plot_waveforms
+from plotting.waveforms import plot_waveforms
 from sawtooth import fit_sawtooth
 from scipy.stats import pearsonr, spearmanr
 from sklearn import linear_model
@@ -60,14 +60,16 @@ def process_pat(sdk, dev, itr):
         #         "naive_pat": np.array([]),
         #     }
 
+        print(w.signals["times"])
+
         # Extract specific signals and convert timescale
+        hr = [v for k, v in w.signals.items() if "BEAT_RATE" in k[0]][0]
+        sbp = [v for k, v in w.signals.items() if "SYS" in k[0]][0]
         ecg, ecg_freq = [(v, k[1]) for k, v in w.signals.items() if "ECG_ELEC" in k[0]][0]
         ppg, ppg_freq = [(v, k[1]) for k, v in w.signals.items() if "PULS" in k[0]][0]
-        abp, abp_freq = [
-            (v, k[1]) for k, v in w.signals.items() if "MDC_PRESS_BLD_ART_ABP" == k[0] or "MDC_PRESS_BLD_ART" == k[0]
+        abp, abp_freq = [(v, k[1]) for k, v in w.signals.items() 
+            if "MDC_PRESS_BLD_ART_ABP" == k[0] or "MDC_PRESS_BLD_ART" == k[0] 
         ][0]
-        sbp = [v for k, v in w.signals.items() if "SYS" in k[0]][0]
-        hr = [v for k, v in w.signals.items() if "BEAT_RATE" in k[0]][0]
 
         # Convert to seconds
         ecg["times"] = ecg["times"] / 10**9
@@ -106,10 +108,10 @@ def process_pat(sdk, dev, itr):
 
             # Line of best fit using RANSAC to deal with outliers
             r1 = linear_model.RANSACRegressor()
-            r1.fit(synced["pats"].reshape(-1, 1), synced["bp"])
+            r1.fit(synced["bp"].reshape(-1, 1), synced["pats"])
 
             r2 = linear_model.RANSACRegressor()
-            r2.fit(synced["naive_pats"].reshape(-1, 1), synced["bp"])
+            r2.fit(synced["bp"].reshape(-1, 1), synced["naive_pats"])
 
             # Calculate medians for better line of best fit
             df = pd.DataFrame(synced)
@@ -126,18 +128,15 @@ def process_pat(sdk, dev, itr):
 
             # Line of best fit using RANSAC to deal with outliers
             mr1 = linear_model.RANSACRegressor()
-            mr1.fit(medians["pats"].to_numpy().reshape(-1, 1), medians["bp"])
+            mr1.fit(medians["bp"].to_numpy().reshape(-1, 1), medians["pats"])
 
             mr2 = linear_model.RANSACRegressor()
-            mr2.fit(
-                naive_medians["naive_pats"].to_numpy().reshape(-1, 1),
-                naive_medians["bp"],
-            )
+            mr2.fit(naive_medians["bp"].to_numpy().reshape(-1, 1), naive_medians["naive_pats"])
 
-            y1 = r1.predict(synced["pats"].reshape(-1, 1))
-            y2 = r2.predict(synced["naive_pats"].reshape(-1, 1))
-            my1 = mr1.predict(synced["pats"].reshape(-1, 1))
-            my2 = mr2.predict(synced["naive_pats"].reshape(-1, 1))
+            y1 = r1.predict(synced["bp"].reshape(-1, 1))
+            y2 = r2.predict(synced["bp"].reshape(-1, 1))
+            my1 = mr1.predict(synced["bp"].reshape(-1, 1))
+            my2 = mr2.predict(synced["bp"].reshape(-1, 1))
 
             window_results.append(
                 {
@@ -177,59 +176,6 @@ def process_pat(sdk, dev, itr):
             print(window_results[-1])
             run_stats["successful"] += 1
 
-            # fig, ax = plt.subplots(2, figsize=(15, 10))
-            # ax[0].plot(synced["pats"], synced["bp"], ".", alpha=0.5)
-            # ax[0].plot(
-            #     medians["pats"], medians["bp"], "ro", markersize=6, label="Medians"
-            # )
-            # ax[0].plot(
-            #     synced["pats"],
-            #     y1,
-            #     label=f"Points Line ({r1.estimator_.intercept_} {r1.estimator_.coef_[0]}x)",
-            # )
-            # ax[0].plot(
-            #     synced["pats"],
-            #     my1,
-            #     label=f"Medians Line ({mr1.estimator_.intercept_} {mr1.estimator_.coef_[0]}x)",
-            # )
-            # ax[0].set_title(f"Corrected Pats")
-            # ax[0].set_xlim(0, 2)
-            # ax[0].legend(loc="upper left")
-            # ax[0].set_xlabel("PAT (s)")
-            # ax[0].set_ylabel("BP (mmHG)")
-            # # ax[0].grid()
-            # ax[1].plot(synced["naive_pats"], synced["bp"], ".", alpha=0.5)
-            # ax[1].plot(
-            #     naive_medians["naive_pats"],
-            #     naive_medians["bp"],
-            #     "ro",
-            #     markersize=5,
-            #     label="Medians",
-            # )
-            # ax[1].plot(
-            #     synced["naive_pats"],
-            #     y2,
-            #     label=f"Points Line ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)",
-            # )
-            # ax[1].plot(
-            #     synced["naive_pats"],
-            #     my2,
-            #     label=f"Medians Line ({mr2.estimator_.intercept_} {mr2.estimator_.coef_[0]}x)",
-            # )
-            # ax[1].set_title(
-            #     f"Naive Pats ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)"
-            # )
-            # ax[1].set_xlim(0, 2)
-            # ax[1].legend(loc="upper right")
-            # ax[1].set_xlabel("PAT (s)")
-            # ax[1].set_ylabel("BP (mmHG)")
-            # # ax[1].grid()
-
-            # plt.tight_layout()
-            # plt.show()
-            # # plt.savefig(f"plots/slopes/{w.device_id}_{w.patient_id}")
-            # plt.close()
-
         # Peak detection faliled to detect enough peaks in calculate_pat
         except AssertionError as e:
             print(f"Signal quality issue: {e}")
@@ -241,11 +187,7 @@ def process_pat(sdk, dev, itr):
                 run_stats["unexpected_failed"] += 1
 
             # # Debug plot
-            # fig, ax = plt.subplots(3, figsize=(15, 10), sharex=True)
-            # ax[0].plot(abp["times"], abp["values"])
-            # ax[1].plot(ecg["times"], ecg["values"])
-            # ax[2].plot(ppg["times"], ppg["values"])
-            # plt.show()
+            # plot_waveforms(ecg, ppg, abp, show=True)
 
         except Exception as e:
             print("Unexpected failure")
@@ -299,13 +241,10 @@ def run(local_dataset, window_size, gap_tol, device):
 
 if __name__ == "__main__":
 
-    # local_dataset = "/mnt/datasets/atriumdb_abp_estimation_2024_02_05"
-    # local_dataset = "/mnt/datasets/ians_data_2024_06_12"
-
     # Newest dataset with Philips measures (SBP, DBP, MAP) (incomplete, 90%)
     # local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
 
-    # New dataset - not tested
+    # Newest dataset
     local_dataset = "/mnt/datasets/ian_dataset_2024_08_15"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
@@ -315,11 +254,11 @@ if __name__ == "__main__":
     print(f"Devices: {devices}")
 
     window_size = 60 * 60  # 60 min
-    gap_tol = 5  # 5s
+    gap_tol = 60 * 5  # 5 min to reduce overlapping windows
 
-    # itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol)
-    # process_pat(sdk, 80, itr)
-    # exit()
+    itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol)
+    process_pat(sdk, 80, itr)
+    exit()
 
     num_cores = 10  # len(devices)
 

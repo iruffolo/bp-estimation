@@ -7,7 +7,7 @@ def plot_waveforms(ecg, ppg, abp, show=False):
     Plot all the raw data waveforms for debugging
     """
 
-    fig, ax = plt.subplots(3, figsize=(15, 10), sharex=True)
+    fig, ax = plt.subplots(3, figsize=(15, 10))
 
     ax[0].plot(ecg["times"], ecg["values"])
     ax[0].set_title("ECG")

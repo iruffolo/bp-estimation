@@ -40,14 +40,16 @@ def process_pat(sdk, dev, itr):
         "failed_alignment": 0,
         "poor_ecg_quality": 0,
         "poor_ppg_quality": 0,
+        "no_patient_id": 0,
     }
+
     # pat_results = {}
     window_results = []
 
     for i, w in enumerate(itr):
 
         if not w.patient_id:
-            print("No patient ID")
+            run_stats["no_patient_id"] += 1
             pbar.update(1)
             continue
 
@@ -60,22 +62,28 @@ def process_pat(sdk, dev, itr):
         #         "naive_pat": np.array([]),
         #     }
 
-        print(w.signals["times"])
+        for (signal, freq, _), v in w.signals.items():
+            # Skip signals without data
+            if v["actual_count"] == 0:
+                continue
 
-        # Extract specific signals and convert timescale
-        hr = [v for k, v in w.signals.items() if "BEAT_RATE" in k[0]][0]
-        sbp = [v for k, v in w.signals.items() if "SYS" in k[0]][0]
-        ecg, ecg_freq = [(v, k[1]) for k, v in w.signals.items() if "ECG_ELEC" in k[0]][0]
-        ppg, ppg_freq = [(v, k[1]) for k, v in w.signals.items() if "PULS" in k[0]][0]
-        abp, abp_freq = [(v, k[1]) for k, v in w.signals.items() 
-            if "MDC_PRESS_BLD_ART_ABP" == k[0] or "MDC_PRESS_BLD_ART" == k[0] 
-        ][0]
+            # Convert to s
+            v["times"] = v["times"] / (10**9)
 
-        # Convert to seconds
-        ecg["times"] = ecg["times"] / 10**9
-        ppg["times"] = ppg["times"] / 10**9
-        abp["times"] = abp["times"] / 10**9
-        sbp["times"] = sbp["times"] / 10**9
+            # Extract specific signals
+            match signal:
+                case signal if "BEAT_RATE" in signal:
+                    hr = v
+                case signal if "SYS" in signal:
+                    sbp = v
+                case signal if "ECG_ELEC" in signal:
+                    ecg, ecg_freq = v, freq
+                case signal if "PULS_OXIM" in signal:
+                    ppg, ppg_freq = v, freq
+                case "MDC_PRESS_BLD_ART" | "MDC_PRESS_BLD_ART_ABP":
+                        abp, abp_freq = v, freq
+                case _:
+                    pass
 
         try:
             pats, naive_pats, n_corrected = calclulate_pat(ecg, ecg_freq, ppg, ppg_freq)
@@ -96,6 +104,8 @@ def process_pat(sdk, dev, itr):
             )
 
             if synced["times"].size < 300:
+                print("errorrror")
+                print(sbp)
                 run_stats["failed_alignment"] += 1
                 pbar.update(1)
                 continue
@@ -131,7 +141,10 @@ def process_pat(sdk, dev, itr):
             mr1.fit(medians["bp"].to_numpy().reshape(-1, 1), medians["pats"])
 
             mr2 = linear_model.RANSACRegressor()
-            mr2.fit(naive_medians["bp"].to_numpy().reshape(-1, 1), naive_medians["naive_pats"])
+            mr2.fit(
+                naive_medians["bp"].to_numpy().reshape(-1, 1),
+                naive_medians["naive_pats"],
+            )
 
             y1 = r1.predict(synced["bp"].reshape(-1, 1))
             y2 = r2.predict(synced["bp"].reshape(-1, 1))
@@ -175,6 +188,58 @@ def process_pat(sdk, dev, itr):
             )
             print(window_results[-1])
             run_stats["successful"] += 1
+
+            fig, ax = plt.subplots(2, figsize=(15, 10))
+            ax[0].plot(synced["pats"], synced["bp"], ".", alpha=0.5)
+            ax[0].plot(
+                medians["pats"], medians["bp"], "ro", markersize=6, label="Medians"
+            )
+            ax[0].plot(
+                synced["pats"],
+                y1,
+                label=f"Points Line ({r1.estimator_.intercept_} {r1.estimator_.coef_[0]}x)",
+            )
+            ax[0].plot(
+                synced["pats"],
+                my1,
+                label=f"Medians Line ({mr1.estimator_.intercept_} {mr1.estimator_.coef_[0]}x)",
+            )
+            ax[0].set_title(f"Corrected Pats")
+            ax[0].set_xlim(0, 2)
+            ax[0].legend(loc="upper left")
+            ax[0].set_xlabel("PAT (s)")
+            ax[0].set_ylabel("BP (mmHG)")
+            # ax[0].grid()
+            ax[1].plot(synced["naive_pats"], synced["bp"], ".", alpha=0.5)
+            ax[1].plot(
+                naive_medians["naive_pats"],
+                naive_medians["bp"],
+                "ro",
+                markersize=5,
+                label="Medians",
+            )
+            ax[1].plot(
+                synced["naive_pats"],
+                y2,
+                label=f"Points Line ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)",
+            )
+            ax[1].plot(
+                synced["naive_pats"],
+                my2,
+                label=f"Medians Line ({mr2.estimator_.intercept_} {mr2.estimator_.coef_[0]}x)",
+            )
+            ax[1].set_title(
+                f"Naive Pats ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)"
+            )
+            ax[1].set_xlim(0, 2)
+            ax[1].legend(loc="upper right")
+            ax[1].set_xlabel("PAT (s)")
+            ax[1].set_ylabel("BP (mmHG)")
+            # ax[1].grid()
+            plt.tight_layout()
+            plt.show()
+            # plt.savefig(f"plots/slopes/{w.device_id}_{w.patient_id}")
+            plt.close()
 
         # Peak detection faliled to detect enough peaks in calculate_pat
         except AssertionError as e:
@@ -254,9 +319,9 @@ if __name__ == "__main__":
     print(f"Devices: {devices}")
 
     window_size = 60 * 60  # 60 min
-    gap_tol = 60 * 5  # 5 min to reduce overlapping windows
+    gap_tol = 3  # 5 min to reduce overlapping windows
 
-    itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol)
+    itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol, 1)
     process_pat(sdk, 80, itr)
     exit()
 

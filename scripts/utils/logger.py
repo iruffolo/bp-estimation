@@ -41,14 +41,14 @@ class Logger:
 
         # Initialize error counts
         self.window_stats = {
-            WindowStatus.SUCCESS: 0,
-            WindowStatus.NO_PATIENT_ID: 0,
-            WindowStatus.UNEXPECTED_FAILURE: 0,
-            WindowStatus.FAILED_BP_ALIGNMENT: 0,
-            WindowStatus.INCOMPLETE_WINDOW: 0,
-            WindowStatus.POOR_ECG_QUALITY: 0,
-            WindowStatus.POOR_PPG_QUALITY: 0,
-            WindowStatus.INSUFFICIENT_PATS: 0,
+            WindowStatus.SUCCESS.name: 0,
+            WindowStatus.NO_PATIENT_ID.name: 0,
+            WindowStatus.UNEXPECTED_FAILURE.name: 0,
+            WindowStatus.FAILED_BP_ALIGNMENT.name: 0,
+            WindowStatus.INCOMPLETE_WINDOW.name: 0,
+            WindowStatus.POOR_ECG_QUALITY.name: 0,
+            WindowStatus.POOR_PPG_QUALITY.name: 0,
+            WindowStatus.INSUFFICIENT_PATS.name: 0,
         }
 
         # Every X windows, log results then reset
@@ -62,7 +62,7 @@ class Logger:
         :param status: The error to log
         """
 
-        self.window_stats[status] += 1
+        self.window_stats[status.name] += 1
 
         if self.verbose:
             print(f"Window Status: {status.name}")
@@ -131,7 +131,7 @@ class Logger:
         print(f"Error Counts for device {self.dev}:")
         print(f"Total Windows: {self.total_windows}")
         for status in self.window_stats:
-            print(f"{status.name}: {self.window_stats[status]}")
+            print(f"{status}: {self.window_stats[status]}")
 
     def save(self):
         """
@@ -142,24 +142,31 @@ class Logger:
             raise ValueError("Path not specified")
 
         if not os.path.exists(self.path):
+            print(f"Creating directory {self.path}")
             os.makedirs(self.path)
+
+        print(self.total_windows)
+        print(self.window_stats)
 
         df = pd.DataFrame(
             {
                 "device": self.dev,
                 "total_windows": self.total_windows,
                 **self.window_stats,
-            }
+            },
+            index=[0],
         )
 
-        df.to_csv(os.path.join(self.path, f"device_{self.dev}_log.csv"))
+        df.to_csv(os.path.join(self.path, f"device_{self.dev}_log.csv"), index=False)
 
 
 if __name__ == "__main__":
 
-    log = Logger(80, 100, verbose=True)
+    log = Logger(80, 2, ".", verbose=True)
 
     log.log_status(WindowStatus.INCOMPLETE_WINDOW)
     log.log_status(WindowStatus.NO_PATIENT_ID)
 
     log.print_stats()
+
+    log.save()

@@ -23,7 +23,7 @@ from utils.atriumdb_helpers import (
 from utils.logger import Logger, WindowStatus
 
 
-def process_pat(sdk, dev, itr):
+def process_pat(sdk, dev, itr, early_stop=None):
     """
     Processing function for dataset iterator
 
@@ -34,7 +34,8 @@ def process_pat(sdk, dev, itr):
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    log = Logger(dev, itr._length, path="../data/results/", verbose=True)
+    num_windows = early_stop if early_stop else itr._length
+    log = Logger(dev, num_windows, path="../data/results/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -146,8 +147,8 @@ def process_pat(sdk, dev, itr):
             print(f"Unexpected failure {e}")
             log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
-        # if i > 200:
-        #     break
+        if early_stop and i >= early_stop:
+            break
 
     log.save()
 
@@ -183,7 +184,7 @@ if __name__ == "__main__":
     gap_tol = 5 * 60  # 5 min to reduce overlapping windows with gap tol
 
     itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol, 1)
-    process_pat(sdk, 80, itr)
+    process_pat(sdk, 80, itr, early_stop=2)
     exit()
 
     num_cores = 10  # len(devices)

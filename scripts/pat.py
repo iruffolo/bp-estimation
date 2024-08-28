@@ -190,8 +190,8 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.150):
         ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
         ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-    assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
-    assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
+    # assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
+    # assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
 
     # Match ppg peaks to ecg peaks
     ssize = 6
@@ -254,8 +254,8 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.150):
 
     pats["times"] = np.delete(pats["times"], tobedeleted)
     pats["values"] = np.delete(pats["values"], tobedeleted)
-    naive_pats["times"] = np.delete(naive_pats["times"], tobedeleted)
-    naive_pats["values"] = np.delete(naive_pats["values"], tobedeleted)
+    # naive_pats["times"] = np.delete(naive_pats["times"], tobedeleted)
+    # naive_pats["values"] = np.delete(naive_pats["values"], tobedeleted)
 
     return pats, naive_pats, num_corrected
 

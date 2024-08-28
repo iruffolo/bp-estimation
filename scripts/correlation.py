@@ -69,8 +69,8 @@ def calc_correlation(synced):
 
     return (
         pearsonr(pats, bp),
-        spearmanr(pats, bp),
         pearsonr(n_pats, bp),
+        spearmanr(pats, bp),
         spearmanr(n_pats, bp),
     )
 

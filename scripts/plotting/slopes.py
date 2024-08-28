@@ -2,55 +2,41 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_slopes(synced, medians, r1):
+def plot_slopes(synced, f1, f2, l1, l2):
+    """
+    Plot the slopes of the lines of best fit for the corrected and naive PATs
+    """
+
+    # Get data from lines of best fit for plotting
+    xx1, yy1 = l1.linspace(domain=[0, 2])
+    xx2, yy2 = l2.linspace(domain=[0, 2])
 
     fig, ax = plt.subplots(2, figsize=(15, 10))
+
+    lw = 3
+    ms = 5
+
     ax[0].plot(synced["pats"], synced["bp"], ".", alpha=0.5)
-    ax[0].plot(medians["pats"], medians["bp"], "ro", markersize=6, label="Medians")
-    ax[0].plot(
-        synced["pats"],
-        y1,
-        label=f"Points Line ({r1.estimator_.intercept_} {r1.estimator_.coef_[0]}x)",
-    )
-    ax[0].plot(
-        synced["pats"],
-        my1,
-        label=f"Medians Line ({mr1.estimator_.intercept_} {mr1.estimator_.coef_[0]}x)",
-    )
-    ax[0].set_title(f"Corrected Pats")
-    ax[0].set_xlim(0, 2)
+    ax[0].plot(f1["pats"]["median"], f1["bp"], "ro", markersize=ms, label="Medians")
+    ax[0].plot(xx1, yy1, label=f"{l1.convert().coef}", linewidth=lw)
+    ax[0].set_title(f"Corrected PATs")
     ax[0].legend(loc="upper left")
-    ax[0].set_xlabel("PAT (s)")
-    ax[0].set_ylabel("BP (mmHG)")
-    # ax[0].grid()
+
     ax[1].plot(synced["naive_pats"], synced["bp"], ".", alpha=0.5)
     ax[1].plot(
-        naive_medians["naive_pats"],
-        naive_medians["bp"],
-        "ro",
-        markersize=5,
-        label="Medians",
+        f2["naive_pats"]["median"], f2["bp"], "ro", markersize=ms, label="Medians"
     )
-    ax[1].plot(
-        synced["naive_pats"],
-        y2,
-        label=f"Points Line ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)",
-    )
-    ax[1].plot(
-        synced["naive_pats"],
-        my2,
-        label=f"Medians Line ({mr2.estimator_.intercept_} {mr2.estimator_.coef_[0]}x)",
-    )
-    ax[1].set_title(
-        f"Naive Pats ({r2.estimator_.intercept_} {r2.estimator_.coef_[0]}x)"
-    )
-    ax[1].set_xlim(0, 2)
+    ax[1].plot(xx2, yy2, label=f"{l2.convert().coef}", linewidth=lw)
+    ax[1].set_title(f"Naive PATs")
     ax[1].legend(loc="upper right")
-    ax[1].set_xlabel("PAT (s)")
-    ax[1].set_ylabel("BP (mmHG)")
-    # ax[1].grid()
+
+    for a in ax:
+        a.set_xlim(0, 2)
+        a.set_ylim(min(synced["bp"] - 5), max(synced["bp"]) + 5)
+        a.set_xlabel("PAT (s)")
+        a.set_ylabel("BP (mmHG)")
 
     plt.tight_layout()
     plt.show()
-    # plt.savefig(f"plots/slopes/{w.device_id}_{w.patient_id}")
+
     plt.close()

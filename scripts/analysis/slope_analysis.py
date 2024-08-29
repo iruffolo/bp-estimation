@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
 
 def add_grid(ax, min, max, step):
@@ -31,20 +32,27 @@ def plot_slope(df, metric):
 
     bins = int(len(df[metric]) / 20)
 
-    thresh = 5000
+    bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15]
+    labels = ["0-1", "1-2", "2-3", "3-4", "4-5", "5-6", "6-7", "7-8", "8-9", "9-15"]
+    df["age_group"] = pd.cut(df["age"], bins=bins, labels=labels, right=False)
 
-    ax[0].hist(df[metric][abs(df[metric]) < thresh], bins=bins)
+    thresh = 3000
+
+    df1 = df[abs(df[metric]) < thresh]
+    df2 = df[abs(df[f"naive_{metric}"]) < thresh]
+
+    df1.groupby("age_group")[metric].plot(kind="kde", ax=ax[0], legend=True)
+    df2.groupby("age_group")[f"naive_{metric}"].plot(kind="kde", ax=ax[1], legend=True)
+
+    # ax[0].hist(df[metric][abs(df[metric]) < thresh], bins=bins)
     ax[0].set_title("Corrected PAT vs SBP Slopes")
     ax[0].set_xlabel("Slope")
     ax[0].set_ylabel("Count")
-    add_grid(ax[0], -4000, 4000, 1000)
 
-    ax[1].hist(df[f"naive_{metric}"][abs(df[f"naive_{metric}"]) < thresh], bins=bins)
+    # ax[1].hist(df[f"naive_{metric}"][abs(df[f"naive_{metric}"]) < thresh], bins=bins)
     ax[1].set_title("Naive PAT vs SBP Slopes")
     ax[1].set_xlabel("Slope")
     ax[1].set_ylabel("Count")
-    add_grid(ax[1], -4000, 4000, 1000)
-
     # add_grid(ax[0], -4000, 2000)
     # add_grid(ax[1], -1000, 1000)
 
@@ -95,7 +103,7 @@ def combine_results(path, write=True):
     results = []
 
     for filename in os.listdir(path):
-        if filename.endswith("csv") and filename != "combined.csv":
+        if filename.endswith("data.csv") and filename != "combined.csv":
             try:
                 data = pd.read_csv(path + filename)
                 results.append(data)
@@ -139,12 +147,14 @@ if __name__ == "__main__":
 
     print("Analysing")
 
-    path = "../data/results/median_slopes/"
+    path = "../../data/results/new_spearman/"
 
     df = combine_results(path, False)
     print(len(df))
+    df["age"] = pd.Timestamp.now().year - pd.DatetimeIndex(df["dob"]).year
 
+    # print(df.columns)
     # check_stats(path)
-    # plot_slope(df, "median_slope")
-    plot_correlation(df[:1000], "pearson")
-    # plot_correlation(df, "spearman")
+    plot_slope(df[df["age"] < 15], "slope")
+    # plot_correlation(df[:1000], "pearson")
+    plot_correlation(df, "spearman")

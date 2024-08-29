@@ -111,17 +111,23 @@ class Logger:
 
         # Log results every X windows and clear array
         if len(self.results) > self.log_rate:
-            df = pd.DataFrame(self.results)
+            self._save_current_res()
 
-            fn = os.path.join(self.path, f"device_{self.dev}_data.csv")
+    def _save_current_res(self):
+        """
+        Save the current results to a CSV file and clear the array
+        """
+        df = pd.DataFrame(self.results)
 
-            # if file does not exist write header, else append
-            if not os.path.isfile(fn):
-                df.to_csv(fn, header="column_names", index=False)
-            else:
-                df.to_csv(fn, mode="a", header=False, index=False)
+        fn = os.path.join(self.path, f"device_{self.dev}_data.csv")
 
-            self.results.clear()
+        # if file does not exist write header, else append
+        if not os.path.isfile(fn):
+            df.to_csv(fn, header="column_names", index=False)
+        else:
+            df.to_csv(fn, mode="a", header=False, index=False)
+
+        self.results.clear()
 
     def print_stats(self):
         """
@@ -158,6 +164,9 @@ class Logger:
         )
 
         df.to_csv(os.path.join(self.path, f"device_{self.dev}_log.csv"), index=False)
+
+        # Dump any remaining data
+        self._save_current_res()
 
 
 if __name__ == "__main__":

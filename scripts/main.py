@@ -35,7 +35,7 @@ def process_pat(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/results/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/results/new_spearman/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -94,8 +94,8 @@ def process_pat(sdk, dev, itr, early_stop=None):
                 continue
 
             # Get Correlation with SBP
-            s1 = spearmanr(synced["pats"], synced["bp"])
-            s2 = spearmanr(synced["naive_pats"], synced["bp"])
+            # s1 = spearmanr(synced["pats"], synced["bp"])
+            # s2 = spearmanr(synced["naive_pats"], synced["bp"])
 
             # Calculate medians for better line of best fit
             median = (
@@ -109,9 +109,12 @@ def process_pat(sdk, dev, itr, early_stop=None):
             f1 = median[["pats", "bp"]][median["pats"]["count"] > 20]
             f2 = median[["naive_pats", "bp"]][median["naive_pats"]["count"] > 20]
 
+            s1 = spearmanr(f1["pats"]["median"], f1["bp"])
+            s2 = spearmanr(f2["naive_pats"]["median"], f2["bp"])
+
             # Fit lines of best fit
             l1 = Polynomial.fit(f1["pats"]["median"], f1["bp"], 1, full=True)
-            l2 = Polynomial.fit(f2["naive_pats"]["median"], f1["bp"], 1, full=True)
+            l2 = Polynomial.fit(f2["naive_pats"]["median"], f2["bp"], 1, full=True)
 
             # Debug plot
             # plot_slopes(synced, f1, f2, l1[0], l2[0])
@@ -183,11 +186,11 @@ if __name__ == "__main__":
     window_size = 60 * 60  # 60 min
     gap_tol = 5 * 60  # 5 min to reduce overlapping windows with gap tol
 
-    itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol, 1)
-    process_pat(sdk, 80, itr, early_stop=2)
-    exit()
+    # itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol, 1)
+    # process_pat(sdk, 80, itr, early_stop=10)
+    # exit()
 
-    num_cores = 10  # len(devices)
+    num_cores = 15  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 

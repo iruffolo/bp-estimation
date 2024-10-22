@@ -170,7 +170,7 @@ def get_matching_peaks(
     return matching_peaks
 
 
-def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.150):
+def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.250):
     """
     Calculate Pulse Arrival Time
 
@@ -257,7 +257,7 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.150):
     # naive_pats["times"] = np.delete(naive_pats["times"], tobedeleted)
     # naive_pats["values"] = np.delete(naive_pats["values"], tobedeleted)
 
-    return pats, naive_pats, num_corrected
+    return pats, naive_pats, num_corrected, ecg_peak_times, ppg_peak_times
 
 
 def calc_pat_abp(ecg, ecg_freq, abp, abp_freq):

@@ -3,9 +3,10 @@ import numpy as np
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
 from pat import calclulate_pat
+from utils.atriumdb_helpers import make_device_itr_all_signals
 
 
-def setup_db(local_dataset, patient_id):
+def setup_db(localset, patient_id):
     """
     Setup function for dataset iterator
     """
@@ -28,7 +29,7 @@ def setup_db(local_dataset, patient_id):
         },
     ]
 
-    sdk = AtriumSDK(dataset_location=local_dataset)
+    sdk = AtriumSDK(dataset_location=localset)
 
     window_size_nano = 60 * 10 * (10**9)
     gap_tol_nano = 0.5 * (10**9)
@@ -56,10 +57,27 @@ def setup_db(local_dataset, patient_id):
 
 if __name__ == "__main__":
 
-    itr = setup_db("/mnt/datasets/atriumdb_abp_estimation_2024_02_05", 14498)
+    # itr = setup_db("/mnt/datasets/ianset_2024_08_26", 13561)
+
+    localset = "/mnt/datasets/ian_dataset_2024_08_26"
+    sdk = AtriumSDK(dataset_location=localset)
+    pid = 13561
+    window_size = 60 * 60  # 60 min
+    gap_tol = 30 * 60  # 5 min to reduce overlapping windows with gap tol
+
+    itr = make_device_itr_all_signals(
+        sdk,
+        window_size,
+        gap_tol,
+        device=90,
+        pid=pid,
+        prefetch=10,
+        shuffel=False,
+    )
+
+    print(itr._length)
 
     pat = []
-    total_n_cleaned = 0
 
     num_plots = 3
     fig, ax = plt.subplots(num_plots, figsize=(15, 10))
@@ -71,40 +89,43 @@ if __name__ == "__main__":
     for i, w in enumerate(itr):
         print(f"Processing window {i}... Patient {w.patient_id}")
 
-        ecg_data, ecg_freq = [
-            (v, k[1] / 10**9) for k, v in w.signals.items() if "ECG" in k[0]
-        ][0]
-        ppg_data, ppg_freq = [
-            (v, k[1] / 10**9) for k, v in w.signals.items() if "PULS" in k[0]
-        ][0]
+        # Extract data from window and validate
+        for (signal, freq, _), v in w.signals.items():
+            # Skip signals without data (ABP, SYS variants)
+            if v["actual_count"] == 0:
+                continue
 
-        # if (np.isnan(ecg_data["values"]).any()) or (np.isnan(ppg_data["values"]).any()):
-        #     print("Skipping window due to NaNs")
-        #     continue
+            # Convert to s
+            v["times"] = v["times"] / (10**9)
 
-        ecg_data["times"] = ecg_data["times"] / 10**9
-        ppg_data["times"] = ppg_data["times"] / 10**9
+            # Extract specific signals
+            match signal:
+                case signal if "ECG_ELEC" in signal:
+                    ecg, ecg_freq = v, freq
+                case signal if "PULS_OXIM" in signal:
+                    ppg, ppg_freq = v, freq
+                case _:
+                    pass
 
-        pats, ecg_peak_times, ppg_peak_times, n_cleaned = calclulate_pat(
-            ecg_data, ecg_freq, ppg_data, ppg_freq
+        pats, naive_pats, n_corr, ecg_peak_times, ppg_peak_times = calclulate_pat(
+            ecg, ecg_freq, ppg, ppg_freq
         )
+        print(pats)
         pat.append(pats)
 
         # Find indicies from values of times
-        idx_ecg = np.nonzero(np.in1d(ecg_data["times"], ecg_peak_times))[0]
-        idx_ppg = np.nonzero(np.in1d(ppg_data["times"], ppg_peak_times))[0]
+        idx_ecg = np.nonzero(np.in1d(ecg["times"], ecg_peak_times))[0]
+        idx_ppg = np.nonzero(np.in1d(ppg["times"], ppg_peak_times))[0]
 
-        ax[0].plot(ecg_data["times"], ecg_data["values"], "b")
-        ax[0].plot(ecg_data["times"][idx_ecg], ecg_data["values"][idx_ecg], "rx")
-        ax[1].plot(ppg_data["times"], ppg_data["values"], "b")
-        ax[1].plot(ppg_data["times"][idx_ppg], ppg_data["values"][idx_ppg], "rx")
+        ax[0].plot(ecg["times"], ecg["values"], "b")
+        ax[0].plot(ecg["times"][idx_ecg], ecg["values"][idx_ecg], "rx")
+        ax[1].plot(ppg["times"], ppg["values"], "b")
+        ax[1].plot(ppg["times"][idx_ppg], ppg["values"][idx_ppg], "rx")
 
-        pat_idx = pats[:, 0].astype(int)
-        pat_values = pats[:, 1]
-        ax[2].plot(ecg_data["times"][idx_ecg][pat_idx], pat_values, "b.")
+        ax[2].plot(pats["times"], pats["values"], "b.")
 
-        total_n_cleaned += n_cleaned
-        # print(pats)
+        if i > 10:
+            break
 
     ax[0].set_title("ECG")
     ax[0].set_xlabel("Time (s)")
@@ -114,16 +135,11 @@ if __name__ == "__main__":
     ax[2].set_title("PAT")
     ax[2].set_xlabel("Time (s)")
     ax[2].set_ylabel("PAT (s)")
-    ax[2].set_ylim(1.0, 1.7)
+    ax[2].set_ylim(0, 2.5)
     ax[2].grid(True)
 
     plt.tight_layout()
     plt.show()
 
-    pat = np.array([y for x in pat for y in x])
-
-    print(f"Removed {total_n_cleaned} outliers")
-    print(f"Out of {len(pat)} measures")
-
-    sns.displot(pat[:, 1], kde=True)
+    sns.displot(pats["values"], kde=True)
     plt.show()

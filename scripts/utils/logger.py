@@ -27,9 +27,16 @@ class Logger:
         :param path: The path to the log file
         :param verbose: Whether to print verbose output
         """
+        if path is None:
+            raise ValueError("Path not specified")
+
         self.dev = dev
         self.path = path
         self.verbose = verbose
+
+        if not os.path.exists(self.path):
+            print(f"Creating directory {self.path}")
+            os.makedirs(self.path)
 
         # Progress bar
         if verbose:
@@ -52,7 +59,7 @@ class Logger:
         }
 
         # Every X windows, log results then reset
-        self.log_rate = 50
+        self.log_rate = 10
         self.results = []
 
     def log_status(self, status: WindowStatus):
@@ -68,7 +75,7 @@ class Logger:
             print(f"Window Status: {status.name}")
             self.pbar.update(1)
 
-    def log_data(self, pid, dob, start, n_corrected, s1, s2, l1, l2, hr, synced):
+    def log_data(self, pid, dob, start, n_corrected, s1, s2, hr, synced):
         """
         Log the data for a window
         """
@@ -83,14 +90,8 @@ class Logger:
             "num_corrected": n_corrected,
             "std_pats": np.std(synced["pats"]),
             "mean_pats": np.mean(synced["pats"]),
-            "slope": l1[0].convert().coef[1],
-            "intercept": l1[0].convert().coef[0],
-            "residual": l1[1][0][0],
             "naive_std_pats": np.std(synced["naive_pats"]),
             "naive_mean_pats": np.mean(synced["naive_pats"]),
-            "naive_slope": l2[0].convert().coef[1],
-            "naive_intercept": l2[0].convert().coef[0],
-            "naive_residual": l2[1][0][0],
             "max_sbp": np.max(synced["bp"]),
             "min_sbp": np.min(synced["bp"]),
             "std_sbp": np.std(synced["bp"]),
@@ -113,13 +114,28 @@ class Logger:
         if len(self.results) > self.log_rate:
             self._save_current_res()
 
+    def log_raw_data(self, data, filename):
+        """
+        Log raw data for a window
+        """
+
+        df = pd.DataFrame(data)
+
+        fn = os.path.join(self.path, f"device_{self.dev}_{filename}.csv")
+
+        # if file does not exist write header, else append
+        if not os.path.isfile(fn):
+            df.to_csv(fn, header="column_names", index=False)
+        else:
+            df.to_csv(fn, mode="a", header=False, index=False)
+
     def _save_current_res(self):
         """
         Save the current results to a CSV file and clear the array
         """
         df = pd.DataFrame(self.results)
 
-        fn = os.path.join(self.path, f"device_{self.dev}_data.csv")
+        fn = os.path.join(self.path, f"device_{self.dev}_summary_data.csv")
 
         # if file does not exist write header, else append
         if not os.path.isfile(fn):
@@ -143,13 +159,6 @@ class Logger:
         """
         Save the log to a CSV file
         """
-
-        if self.path is None:
-            raise ValueError("Path not specified")
-
-        if not os.path.exists(self.path):
-            print(f"Creating directory {self.path}")
-            os.makedirs(self.path)
 
         print(self.total_windows)
         print(self.window_stats)

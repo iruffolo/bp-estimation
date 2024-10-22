@@ -1,5 +1,6 @@
 import concurrent.futures
 import os
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,7 +36,7 @@ def process_pat(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/results/new_spearman/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/results/paper_results/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -72,8 +73,15 @@ def process_pat(sdk, dev, itr, early_stop=None):
             log.log_status(WindowStatus.INCOMPLETE_WINDOW)
             continue
 
+        # Filter out by date less than 2023-01-01
+        # if ecg["times"][0] > 1640998861:
+        #     print(f"Date filter {datetime.fromtimestamp(ecg['times'][0])}")
+        #     continue
+
         try:
-            pats, naive_pats, n_corrected = calclulate_pat(ecg, ecg_freq, ppg, ppg_freq)
+            pats, naive_pats, n_corrected, ecg_times, ppg_times = calclulate_pat(
+                ecg, ecg_freq, ppg, ppg_freq
+            )
 
             # Window has very sparse measurements, poor quality
             if pats["times"].size < 500:
@@ -94,27 +102,27 @@ def process_pat(sdk, dev, itr, early_stop=None):
                 continue
 
             # Get Correlation with SBP
-            # s1 = spearmanr(synced["pats"], synced["bp"])
-            # s2 = spearmanr(synced["naive_pats"], synced["bp"])
+            s1 = spearmanr(synced["pats"], synced["bp"])
+            s2 = spearmanr(synced["naive_pats"], synced["bp"])
 
             # Calculate medians for better line of best fit
-            median = (
-                pd.DataFrame(synced)
-                .groupby("bp")
-                .agg({"pats": ["median", "count"], "naive_pats": ["median", "count"]})
-                .reset_index()
-            )
+            # median = (
+            #     pd.DataFrame(synced)
+            #     .groupby("bp")
+            #     .agg({"pats": ["median", "count"], "naive_pats": ["median", "count"]})
+            #     .reset_index()
+            # )
 
             # Filter by minimum number of PAT points per BP value
-            f1 = median[["pats", "bp"]][median["pats"]["count"] > 20]
-            f2 = median[["naive_pats", "bp"]][median["naive_pats"]["count"] > 20]
+            # f1 = median[["pats", "bp"]][median["pats"]["count"] > 20]
+            # f2 = median[["naive_pats", "bp"]][median["naive_pats"]["count"] > 20]
 
-            s1 = spearmanr(f1["pats"]["median"], f1["bp"])
-            s2 = spearmanr(f2["naive_pats"]["median"], f2["bp"])
+            # s1 = spearmanr(f1["pats"]["median"], f1["bp"])
+            # s2 = spearmanr(f2["naive_pats"]["median"], f2["bp"])
 
             # Fit lines of best fit
-            l1 = Polynomial.fit(f1["pats"]["median"], f1["bp"], 1, full=True)
-            l2 = Polynomial.fit(f2["naive_pats"]["median"], f2["bp"], 1, full=True)
+            # l1 = Polynomial.fit(f1["pats"]["median"], f1["bp"], 1, full=True)
+            # l2 = Polynomial.fit(f2["naive_pats"]["median"], f2["bp"], 1, full=True)
 
             # Debug plot
             # plot_slopes(synced, f1, f2, l1[0], l2[0])
@@ -126,11 +134,40 @@ def process_pat(sdk, dev, itr, early_stop=None):
                 n_corrected,
                 s1,
                 s2,
-                l1,
-                l2,
                 hr,
                 synced,
             )
+            log.log_raw_data(
+                {
+                    "patient_id": np.full_like(pats["times"], w.patient_id),
+                    "ecg_peaks": pats["times"],
+                    "pat": pats["values"],
+                    "corrected_pat": corrected_pat,
+                },
+                f"pats",
+            )
+            log.log_raw_data(
+                {
+                    "patient_id": np.full_like(naive_pats["times"], w.patient_id),
+                    "ecg_peaks": naive_pats["times"],
+                    "naive_pat": naive_pats["values"],
+                },
+                f"naive_pats",
+            )
+            # log.log_raw_data(
+            #     {
+            #         "patient_id": np.full_like(ecg_times, w.patient_id),
+            #         "ecg_peaks": ecg_times,
+            #     },
+            #     f"ecg_peaks",
+            # )
+            # log.log_raw_data(
+            #     {
+            #         "patient_id": np.full_like(ppg_times, w.patient_id),
+            #         "ppg_peaks": ppg_times,
+            #     },
+            #     f"ppg_peaks",
+            # )
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -163,7 +200,21 @@ def run(local_dataset, window_size, gap_tol, device):
     Function to run in parallel
     """
     sdk = AtriumSDK(dataset_location=local_dataset)
-    itr = make_device_itr_all_signals(sdk, device, window_size, gap_tol)
+
+    # twentytwo = 1640998861 * (10**9)
+    # twentythree = 1672531200 * (10**9)
+
+    itr = make_device_itr_all_signals(
+        sdk,
+        window_size,
+        gap_tol,
+        device=device,
+        pid=None,
+        prefetch=100,
+        shuffle=False,
+        start=None,
+        end=None,
+    )
     process_pat(sdk, device, itr)
 
     return True
@@ -175,7 +226,7 @@ if __name__ == "__main__":
     # local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
 
     # Newest dataset
-    local_dataset = "/mnt/datasets/ian_dataset_2024_08_15"
+    local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
     print_all_measures(sdk)
@@ -183,11 +234,11 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 60 * 60  # 60 min
-    gap_tol = 5 * 60  # 5 min to reduce overlapping windows with gap tol
+    window_size = 30 * 60  # 30 min
+    gap_tol = 30 * 60  # 30 min to reduce overlapping windows with gap tol
 
-    # itr = make_device_itr_all_signals(sdk, 80, window_size, gap_tol, 1)
-    # process_pat(sdk, 80, itr, early_stop=10)
+    # itr = make_device_itr_all_signals(sdk, window_size, gap_tol, 80, shuffle=True)
+    # process_pat(sdk, 80, itr, early_stop=100)
     # exit()
 
     num_cores = 15  # len(devices)

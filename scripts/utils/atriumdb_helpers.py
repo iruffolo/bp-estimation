@@ -155,7 +155,17 @@ def make_device_itr(
     return itr
 
 
-def make_device_itr_all_signals(sdk, device, window_size, gap_tol, prefetch=10):
+def make_device_itr_all_signals(
+    sdk,
+    window_size,
+    gap_tol,
+    device=None,
+    pid=None,
+    prefetch=10,
+    shuffle=True,
+    start=None,
+    end=None,
+):
     """
     Creates new SDK instance and iterator for a specific device
 
@@ -197,7 +207,12 @@ def make_device_itr_all_signals(sdk, device, window_size, gap_tol, prefetch=10):
         intervals_union_list(
             [
                 sdk.get_interval_array(
-                    id, device_id=device, gap_tolerance_nano=gap_tol_nano
+                    id,
+                    device_id=device,
+                    patient_id=pid,
+                    gap_tolerance_nano=gap_tol_nano,
+                    start=start,
+                    end=end,
                 )
                 for id in abp_ids
             ]
@@ -207,7 +222,12 @@ def make_device_itr_all_signals(sdk, device, window_size, gap_tol, prefetch=10):
         intervals_union_list(
             [
                 sdk.get_interval_array(
-                    id, device_id=device, gap_tolerance_nano=gap_tol_nano
+                    id,
+                    device_id=device,
+                    patient_id=pid,
+                    gap_tolerance_nano=gap_tol_nano,
+                    start=start,
+                    end=end,
                 )
                 for id in sys_ids
             ]
@@ -215,16 +235,33 @@ def make_device_itr_all_signals(sdk, device, window_size, gap_tol, prefetch=10):
     )
     ecg_intervals = Intervals(
         sdk.get_interval_array(
-            ecg_id, device_id=device, gap_tolerance_nano=gap_tol_nano
+            ecg_id,
+            device_id=device,
+            patient_id=pid,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start,
+            end=end,
         )
     )
     ppg_intervals = Intervals(
         sdk.get_interval_array(
-            ppg_id, device_id=device, gap_tolerance_nano=gap_tol_nano
+            ppg_id,
+            device_id=device,
+            patient_id=pid,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start,
+            end=end,
         )
     )
     hr_intervals = Intervals(
-        sdk.get_interval_array(hr_id, device_id=device, gap_tolerance_nano=gap_tol_nano)
+        sdk.get_interval_array(
+            hr_id,
+            device_id=device,
+            patient_id=pid,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start,
+            end=end,
+        )
     )
 
     total_waveform_intervals = ecg_intervals.intersection(ppg_intervals).intersection(
@@ -240,6 +277,7 @@ def make_device_itr_all_signals(sdk, device, window_size, gap_tol, prefetch=10):
             ).interval_arr
         ]
     }
+    # print(device_ids)
 
     definition = DatasetDefinition(measures=measures, device_ids=device_ids)
 
@@ -250,7 +288,7 @@ def make_device_itr_all_signals(sdk, device, window_size, gap_tol, prefetch=10):
         gap_tolerance=gap_tol,
         num_windows_prefetch=prefetch,
         time_units="s",
-        # shuffle=True,
+        shuffle=shuffle,
     )
 
     return itr

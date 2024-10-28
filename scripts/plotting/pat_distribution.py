@@ -1,5 +1,6 @@
 import glob
 import os
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -7,20 +8,15 @@ import seaborn as sns
 
 if __name__ == "__main__":
 
-    devices = list(range(74, 116))
-
     path = "/home/ian/dev/bp-estimation/data/paper_results"
     files = os.listdir(path)
 
     # for f in glob.glob(f"{path}/*[0-9]_pats.csv"):
-    # print(f)
-
-    # for f in files:
-    # print(f)
-
     pats = []
     naives = []
     summaries = []
+
+    devices = list(range(74, 116))
 
     for d in devices:
 
@@ -33,13 +29,19 @@ if __name__ == "__main__":
             naive = pd.read_csv(f"{path}/{naive_fn[0]}")
             summary = pd.read_csv(f"{path}/{summary_fn[0]}")
 
-            pats.append(pat)
+            pat["start_date"] = (pat["ecg_peaks"]).apply(datetime.fromtimestamp)
+            naive["start_date"] = (naive["ecg_peaks"]).apply(datetime.fromtimestamp)
 
-            # print(len(pats))
-            # print(pats)
-            # print(summary)
+            pats.append(pat)
+            naives.append(naive)
+            summaries.append(summary)
+
+            # print(pat)
 
         df = pd.concat(pats, ignore_index=True)
 
-    sns.displot(df["corrected_pat"], bins=100, kde=True)
+    print(len(df["corrected_pat"]))
+
+    sns.kdeplot(df[df["start_date"] < "2017-01-03"], x="corrected_pat")
+    sns.kdeplot(df[df["start_date"] >= "2017-01-03"], x="corrected_pat")
     plt.show()

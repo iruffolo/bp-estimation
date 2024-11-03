@@ -108,6 +108,12 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         textin_st_phase.setText("Phase")
         vbutton_layout1.addWidget(textin_st_phase)
 
+        textin_st_amp = QtWidgets.QLineEdit()
+        textin_st_amp.setFixedSize(100, 30)
+        textin_st_amp.textChanged.connect(self._st_amp_change)
+        textin_st_amp.setText("Amplitude")
+        vbutton_layout1.addWidget(textin_st_amp)
+
     def add_patients(self, patients, callback):
         self.patient_dropdown.clear()
 
@@ -167,6 +173,18 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         except ValueError:
             return
 
+    def _st_amp_change(self, st_amp):
+        try:  # Check if input is a number
+            new_st_amp = float(st_amp)
+            if new_st_amp > 0:
+                self.fitp1[0] = st_amp
+                self._update_sawtooth1(fit=False)
+                self._update_sawtooth2()
+                self._update_sawtooth3()
+                self._update_dynamic_plot()
+        except ValueError:
+            return
+
     def _st_phase_change(self, st_phase):
         try:  # Check if input is a number
             new_st_phase = float(st_phase)
@@ -192,39 +210,6 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._plot_static()
         self._plot_dynamic()
         self._setup_plots()
-
-    def _plot_static(self):
-        print("Plotting static")
-        self._pat_series_ax.clear()
-
-        self._pat_series_ax.plot(self.x, self.y, ".", markersize=1.0)
-        median = np.median(self.y)
-        yrange = 0.5
-        print(f"Median: {median}, Range: {yrange}")
-
-        self.ymin = median - yrange
-        self.ymax = median + yrange
-        self._pat_series_ax.set_ylim(self.ymin, self.ymax)
-        self._pat_series_ax.figure.canvas.draw()
-
-    def _plot_dynamic(self):
-        self._sawtooth_ax1.clear()
-        self._sawtooth_ax2.clear()
-        self._final_ax.clear()
-
-        self._a1_p1 = self._sawtooth_ax1.plot([], [], ".", markersize=1.0)[0]
-        self._a1_p2 = self._sawtooth_ax1.plot(
-            [], [], "--", markersize=1.0, color="red"
-        )[0]
-        self._a1_p3 = self._sawtooth_ax1.plot([], [], "--", markersize=1.0)[0]
-
-        self._a2_p1 = self._sawtooth_ax2.plot([], [], ".", markersize=1.0)[0]
-        self._a2_p2 = self._sawtooth_ax2.plot(
-            [], [], "--", markersize=1.0, color="red"
-        )[0]
-
-        self._a3_p1 = self._final_ax.plot([], [], ".", markersize=1.0)[0]
-        self._step_update(step=False)
 
     def _reset_dynamic(self):
         self.start_time = self.x.iloc[0]
@@ -255,6 +240,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self.ydata = self.y.iloc[idx]
 
         self.x_shift = self.xdata - self.xdata.iloc[0]
+        self.x_shift_scaled = self.x_shift / self.x_shift.iloc[-1]
 
     def _update_sawtooth1(self, fit=True):
         """
@@ -265,28 +251,27 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         if fit:
             self.st1, self.fitp1 = fit_sawtooth(self.x_shift, self.ydata, period_sec=51)
             # Optimize the first st
-            y_st1 = _create_sawtooth(self.x_shift, *self.fitp1)
+            y_st1 = _create_sawtooth(self.x_shift_scaled, *self.fitp1)
 
             phase_shifts = np.linspace(0, 2 * np.pi, num=314 * 2)
             best = self.fitp1[3]
             for ps in phase_shifts:
-                y_st = _create_sawtooth(self.x_shift, *self.fitp1[:3], ps)
+                y_st = _create_sawtooth(self.x_shift_scaled, *self.fitp1[:3], ps)
                 e = sawtooth_error(self.ydata, y_st)
-
-                print(ps, e, best)
+                # print(ps, e, best)
                 if e < sawtooth_error(self.ydata, y_st1):
                     best = ps
 
-            print(f"Best phase: {best}")
             print(f"Old phase: {self.fitp1[3]}")
+            print(f"New phase: {best}")
 
             # Update the phase of sawtooth
             self.fitp1[3] = best
 
         else:
-            self.st1 = _create_sawtooth(self.x_shift, *self.fitp1)
+            self.st1 = _create_sawtooth(self.x_shift_scaled, *self.fitp1)
 
-        self.fixed_st1 = self.ydata - self.st1 + self.fitp1[2]
+        self.fixed_st1 = (self.ydata - self.st1) + self.fitp1[2]
 
     def _update_sawtooth2(self):
         # Second Sawtooth
@@ -309,17 +294,18 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         y_st1 = _create_sawtooth(x_st, *self.fitp1)
         y_st2 = _create_sawtooth(x_st, *self.fitp2)
 
-        # y_st1_best = _create_sawtooth(x_st, *self.fitp1[:3], self.best_phase)
-        # self._sawtooth_ax1.plot(
-        #     x_ls + self.xdata.iloc[0], y_st1_best, "--", color="green"
-        # )
-
         # Plot Raw data
         self._a1_p1.set_data(self.xdata, self.ydata)
         self._a2_p1.set_data(self.xdata, self.fixed_st1)
         self._a3_p1.set_data(self.xdata, self.final)
 
-        self._a1_p2.set_data(x_ls + self.xdata.iloc[0], y_st1)
+        # xs = self.xdata / self.xdata.iloc[-1]
+        # ys = _create_sawtooth(xs, *self.fitp1)
+        # self._a1_p2.set_data(self.xdata, ys)
+
+        self._a1_p2.set_data(self.xdata, self.st1)
+
+        # self._a1_p2.set_data(x_ls + self.xdata.iloc[0], y_st1)
         self._a2_p2.set_data(x_ls + self.xdata.iloc[0], y_st2)
 
         self.text1.setText(
@@ -339,10 +325,10 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
         # Adjust the axes to follow the sawtooth.
         self._sawtooth_ax1.set_xlim(np.min(self.xdata), np.max(self.xdata))
-        # self._sawtooth_ax1.set_ylim(
-        #     np.median(self.ydata) - 0.05, np.median(self.ydata) + 0.05
-        # )
-        self._sawtooth_ax1.set_ylim(0, 2)
+        self._sawtooth_ax1.set_ylim(
+            np.median(self.ydata) - 0.05, np.median(self.ydata) + 0.05
+        )
+        # self._sawtooth_ax1.set_ylim(0, 2)
 
         # Update the figure.
         self._a1_p1.figure.canvas.draw()
@@ -351,6 +337,39 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._a2_p1.figure.canvas.draw()
         self._a2_p2.figure.canvas.draw()
         self._a3_p1.figure.canvas.draw()
+
+    def _plot_static(self):
+        print("Plotting static")
+        self._pat_series_ax.clear()
+
+        self._pat_series_ax.plot(self.x, self.y, ".", markersize=1.0)
+        median = np.median(self.y)
+        yrange = 0.5
+        print(f"Median: {median}, Range: {yrange}")
+
+        self.ymin = median - yrange
+        self.ymax = median + yrange
+        self._pat_series_ax.set_ylim(self.ymin, self.ymax)
+        self._pat_series_ax.figure.canvas.draw()
+
+    def _plot_dynamic(self):
+        self._sawtooth_ax1.clear()
+        self._sawtooth_ax2.clear()
+        self._final_ax.clear()
+
+        self._a1_p1 = self._sawtooth_ax1.plot([], [], ".", markersize=1.0)[0]
+        self._a1_p2 = self._sawtooth_ax1.plot([], [], "x", markersize=1.0, color="red")[
+            0
+        ]
+        self._a1_p3 = self._sawtooth_ax1.plot([], [], "--", markersize=1.0)[0]
+
+        self._a2_p1 = self._sawtooth_ax2.plot([], [], ".", markersize=1.0)[0]
+        self._a2_p2 = self._sawtooth_ax2.plot(
+            [], [], "--", markersize=1.0, color="red"
+        )[0]
+
+        self._a3_p1 = self._final_ax.plot([], [], ".", markersize=1.0)[0]
+        self._step_update(step=False)
 
     def _setup_plots(self):
         self._pat_series_ax.set_xlabel("Time (s)")

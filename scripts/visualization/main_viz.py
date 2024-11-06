@@ -44,8 +44,8 @@ if __name__ == "__main__":
     qapp = QtWidgets.QApplication(sys.argv)
     app = ApplicationWindow(sys.argv)
 
-    # path = "/home/ian/dev/bp-estimation/data/paper_results_short/"
-    path = "/home/ian/dev/bp-estimation/data/paper_results/"
+    path = "/home/ian/dev/bp-estimation/data/paper_results_short/"
+    # path = "/home/ian/dev/bp-estimation/data/paper_results/"
 
     dm = DataManger(path)
     devices = list(range(74, 116))

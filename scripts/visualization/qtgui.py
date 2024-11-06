@@ -34,85 +34,112 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         ## Plotting Canvases
 
         # Main canvas for entire PAT series
-        static_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(static_canvas, self), 0, 0, 1, 2)
-        layout.addWidget(static_canvas, 1, 0, 1, 2)
+        full_series_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(NavigationToolbar(full_series_canvas, self), 0, 0, 1, 5)
+        layout.addWidget(full_series_canvas, 1, 0, 1, 6)
 
         # Secondary canvas for first sawtooth fit
-        dynamic_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(dynamic_canvas, self), 2, 0)
-        layout.addWidget(dynamic_canvas, 3, 0)
+        sawtooth1_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(NavigationToolbar(sawtooth1_canvas, self), 2, 0)
+        layout.addWidget(sawtooth1_canvas, 3, 0)
         self.text1 = QtWidgets.QLineEdit()
         layout.addWidget(self.text1, 4, 0)
 
         # Secondary canvas for second sawtooth fit
-        dynamic_canvas2 = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(dynamic_canvas2, self), 2, 1)
-        layout.addWidget(dynamic_canvas2, 3, 1)
+        sawtooth2_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(NavigationToolbar(sawtooth2_canvas, self), 2, 1)
+        layout.addWidget(sawtooth2_canvas, 3, 1)
+        self.text2 = QtWidgets.QLineEdit()
+        layout.addWidget(self.text2, 4, 1)
+
+        # Secondary canvas for second sawtooth fit
+        corrected_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(NavigationToolbar(corrected_canvas, self), 2, 2)
+        layout.addWidget(corrected_canvas, 3, 2)
         self.text2 = QtWidgets.QLineEdit()
         layout.addWidget(self.text2, 4, 1)
 
         # Final canvas for corrected PATs with both sawtooth fits applied
-        final_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(final_canvas, self), 5, 0, 1, 2)
-        layout.addWidget(final_canvas, 6, 0, 1, 2)
+        full_corrected_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(NavigationToolbar(full_corrected_canvas, self), 5, 0, 1, 2)
+        layout.addWidget(full_corrected_canvas, 6, 0, 1, 6)
         ### Control Buttons on the right
 
         # Create canvas for static and dynamic plots
-        self._pat_series_ax = static_canvas.figure.subplots()
-        self._sawtooth_ax1 = dynamic_canvas.figure.subplots()
-        self._sawtooth_ax2 = dynamic_canvas2.figure.subplots()
-        self._final_ax = final_canvas.figure.subplots()
-        self._setup_plots()
+        self._pat_series_ax = full_series_canvas.figure.subplots()
+        self._sawtooth_ax1 = sawtooth1_canvas.figure.subplots()
+        self._sawtooth_ax2 = sawtooth2_canvas.figure.subplots()
+        self._corrected_ax = corrected_canvas.figure.subplots()
+        self._final_ax = full_corrected_canvas.figure.subplots()
 
         # Dropdowns for device and patient selection
         vbutton_layout = QtWidgets.QVBoxLayout()
-        layout.addLayout(vbutton_layout, 1, 2, 1, 2)
+        layout.addLayout(vbutton_layout, 1, 6, 1, 2)
         self.device_dropdown = QtWidgets.QComboBox()
         self.device_dropdown.setFixedSize(80, 30)
         self.patient_dropdown = QtWidgets.QComboBox()
         self.patient_dropdown.setFixedSize(80, 30)
-        # self.patient_dropdown.addItem("Patient X")
         vbutton_layout.addWidget(self.device_dropdown)
         vbutton_layout.addWidget(self.patient_dropdown)
 
         # Buttons to step through dynamic plots and change window params
-        vbutton_layout1 = QtWidgets.QVBoxLayout()
-        layout.addLayout(vbutton_layout1, 3, 2, 1, 2)
+        gbutton_layout = QtWidgets.QGridLayout()
+        layout.addLayout(gbutton_layout, 3, 6, 1, 2)
         step_button = QtWidgets.QPushButton("Step")
-        step_button.setFixedSize(100, 50)
+        step_button.setFixedSize(50, 30)
         step_button.clicked.connect(lambda: self._step_update(step=True))
-        vbutton_layout1.addWidget(step_button)
+        gbutton_layout.addWidget(step_button, 0, 0)
         reset_button = QtWidgets.QPushButton("Reset")
-        reset_button.setFixedSize(100, 50)
+        reset_button.setFixedSize(50, 30)
         reset_button.clicked.connect(self._reset_dynamic)
-        vbutton_layout1.addWidget(reset_button)
+        gbutton_layout.addWidget(reset_button, 0, 1)
 
         # Text input for window size
         textin = QtWidgets.QLineEdit()
-        textin.setFixedSize(100, 30)
+        textin.setFixedSize(40, 30)
         textin.textChanged.connect(self._window_size_change)
         textin.setText(f"{self.window_s / 60}")
-        vbutton_layout1.addWidget(textin)
+        gbutton_layout.addWidget(textin, 0, 2)
 
-        # Text input for ST params
-        textin_st_p = QtWidgets.QLineEdit()
-        textin_st_p.setFixedSize(100, 30)
-        textin_st_p.textChanged.connect(self._st_period_change)
-        textin_st_p.setText("Period")
-        vbutton_layout1.addWidget(textin_st_p)
+        # Text input for ST params for both sawtooths
+        p1b = QtWidgets.QPushButton("Period")
+        p1b.setFixedSize(50, 30)
+        gbutton_layout.addWidget(p1b, 1, 0)
+        self.p1 = QtWidgets.QLineEdit()
+        self.p1.setFixedSize(50, 30)
+        self.p1.textChanged.connect(lambda x: self._st_param_change(x, 1, 0))
+        gbutton_layout.addWidget(self.p1, 1, 1)
+        self.p2 = QtWidgets.QLineEdit()
+        self.p2.setFixedSize(50, 30)
+        self.p2.textChanged.connect(lambda x: self._st_param_change(x, 1, 1))
+        gbutton_layout.addWidget(self.p2, 1, 2)
 
-        textin_st_phase = QtWidgets.QLineEdit()
-        textin_st_phase.setFixedSize(100, 30)
-        textin_st_phase.textChanged.connect(self._st_phase_change)
-        textin_st_phase.setText("Phase")
-        vbutton_layout1.addWidget(textin_st_phase)
+        ph1b = QtWidgets.QPushButton("Phase")
+        ph1b.setFixedSize(50, 30)
+        gbutton_layout.addWidget(ph1b, 2, 0)
+        self.ph1 = QtWidgets.QLineEdit()
+        self.ph1.setFixedSize(50, 30)
+        self.ph1.textChanged.connect(lambda x: self._st_param_change(x, 3, 0))
+        gbutton_layout.addWidget(self.ph1, 2, 1)
+        self.ph2 = QtWidgets.QLineEdit()
+        self.ph2.setFixedSize(50, 30)
+        self.ph2.textChanged.connect(lambda x: self._st_param_change(x, 3, 1))
+        gbutton_layout.addWidget(self.ph2, 2, 2)
 
-        textin_st_amp = QtWidgets.QLineEdit()
-        textin_st_amp.setFixedSize(100, 30)
-        textin_st_amp.textChanged.connect(self._st_amp_change)
-        textin_st_amp.setText("Amplitude")
-        vbutton_layout1.addWidget(textin_st_amp)
+        a1b = QtWidgets.QPushButton("Amp")
+        a1b.setFixedSize(50, 30)
+        gbutton_layout.addWidget(a1b, 3, 0)
+        self.a1 = QtWidgets.QLineEdit()
+        self.a1.setFixedSize(50, 30)
+        self.a1.textChanged.connect(lambda x: self._st_param_change(x, 0, 0))
+        gbutton_layout.addWidget(self.a1, 3, 1)
+        self.a2 = QtWidgets.QLineEdit()
+        self.a2.setFixedSize(50, 30)
+        self.a2.textChanged.connect(lambda x: self._st_param_change(x, 0, 1))
+        gbutton_layout.addWidget(self.a2, 3, 2)
+
+        # Call this at end after all buttons etc are created
+        self._setup_plots()
 
     def add_patients(self, patients, callback):
         self.patient_dropdown.clear()
@@ -161,40 +188,31 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         except ValueError:
             return
 
-    def _st_period_change(self, st_period):
-        try:  # Check if input is a number
-            new_st_period = float(st_period)
-            if new_st_period > 0:
-                self.fitp1[1] = st_period
-                self._update_sawtooth1(fit=False)
-                self._update_sawtooth2()
+    def _st_param_change(self, val, param, st):
+        """
+        Callback for changing sawtooth parameters
+
+        val: str, new value of parameter
+        param: int, which parameter to change. 0=amp, 1=period, 2=phase
+        st: int, which sawtooth to change
+        """
+
+        try:  # Ensure input is a number
+            new_val = float(val)
+            if new_val > 0 or param == 3:
+
+                if st == 0:
+                    self.fitp1[param] = new_val
+                    # Recalculate the sawtooths with new params
+                    self._update_sawtooth1(fit=False)
+                    self._update_sawtooth2(fit=True)
+                elif st == 1:
+                    self.fitp2[param] = new_val
+                    # Recalculate the sawtooths with new params
+                    self._update_sawtooth2(fit=False)
+
                 self._update_sawtooth3()
-                self._update_dynamic_plot()
-        except ValueError:
-            return
-
-    def _st_amp_change(self, st_amp):
-        try:  # Check if input is a number
-            new_st_amp = float(st_amp)
-            if new_st_amp > 0:
-                self.fitp1[0] = st_amp
-                self._update_sawtooth1(fit=False)
-                self._update_sawtooth2()
-                self._update_sawtooth3()
-                self._update_dynamic_plot()
-        except ValueError:
-            return
-
-    def _st_phase_change(self, st_phase):
-        try:  # Check if input is a number
-            new_st_phase = float(st_phase)
-            print(f"New phase: {new_st_phase}")
-
-            self.fitp1[3] = st_phase
-            self._update_sawtooth1(fit=False)
-            self._update_sawtooth2()
-            self._update_sawtooth3()
-            self._update_dynamic_plot()
+                self._update_sawtooth_plots()
         except ValueError:
             return
 
@@ -210,6 +228,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._plot_static()
         self._plot_dynamic()
         self._setup_plots()
+        self._update_text()
 
     def _reset_dynamic(self):
         self.start_time = self.x.iloc[0]
@@ -220,7 +239,8 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._update_sawtooth1()
         self._update_sawtooth2()
         self._update_sawtooth3()
-        self._update_dynamic_plot()
+        self._update_sawtooth_plots()
+        self._update_text()
 
     def _update_window(self, step=True):
         if step:
@@ -273,19 +293,23 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
         self.fixed_st1 = (self.ydata - self.st1) + self.fitp1[2]
 
-    def _update_sawtooth2(self):
+    def _update_sawtooth2(self, fit=True):
         # Second Sawtooth
-        self.st2, self.fitp2 = fit_sawtooth(
-            self.x_shift, self.fixed_st1, period_sec=125
-        )
+
+        if fit:
+            self.st2, self.fitp2 = fit_sawtooth(
+                self.x_shift, self.fixed_st1, period_sec=125
+            )
+        else:
+            self.st2 = _create_sawtooth(self.x_shift_scaled, *self.fitp2)
 
     def _update_sawtooth3(self):
         # Final corrected PATs - Both STs applied
         self.final = self.fixed_st1 - self.st2 + self.fitp2[2]
 
-    def _update_dynamic_plot(self):
+    def _update_sawtooth_plots(self):
 
-        print(f"Updating sawtooth, starting at index {self.index}")
+        print(f"Updating sawtooth plot, starting at index {self.index}")
 
         x_ls = np.linspace(min(self.x_shift), max(self.x_shift), num=500)
         x_st = x_ls / x_ls[-1]
@@ -304,24 +328,8 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         # self._a1_p2.set_data(self.xdata, ys)
 
         self._a1_p2.set_data(self.xdata, self.st1)
-
         # self._a1_p2.set_data(x_ls + self.xdata.iloc[0], y_st1)
         self._a2_p2.set_data(x_ls + self.xdata.iloc[0], y_st2)
-
-        self.text1.setText(
-            f"Sawtooth 1 fit: "
-            f"A={self.fitp1[0]:.4f}, "
-            f"Period={self.fitp1[1]:.2f}, "
-            f"Offset={self.fitp1[2]:.2f}, "
-            f"Phase={self.fitp1[3]:.2f}"
-        )
-        self.text2.setText(
-            f"Sawtooth 1 fit: "
-            f"A={self.fitp2[0]:.4f}, "
-            f"Period={self.fitp2[1]:.2f}, "
-            f"Offset={self.fitp2[2]:.2f}, "
-            f"Phase={self.fitp2[3]:.2f}"
-        )
 
         # Adjust the axes to follow the sawtooth.
         self._sawtooth_ax1.set_xlim(np.min(self.xdata), np.max(self.xdata))
@@ -337,6 +345,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._a2_p1.figure.canvas.draw()
         self._a2_p2.figure.canvas.draw()
         self._a3_p1.figure.canvas.draw()
+        self._a4_p1.figure.canvas.draw()
 
     def _plot_static(self):
         print("Plotting static")
@@ -368,7 +377,10 @@ class ApplicationWindow(QtWidgets.QMainWindow):
             [], [], "--", markersize=1.0, color="red"
         )[0]
 
-        self._a3_p1 = self._final_ax.plot([], [], ".", markersize=1.0)[0]
+        self._a3_p1 = self._corrected_ax.plot([], [], ".", markersize=1.0)[0]
+
+        self._a4_p1 = self._final_ax.plot([], [], ".", markersize=1.0)[0]
+
         self._step_update(step=False)
 
     def _setup_plots(self):
@@ -394,28 +406,62 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         )
         self._sawtooth_ax2.grid(True)
 
-        self._final_ax.set_xlabel("Time (s)")
-        self._final_ax.set_ylabel("PAT (s)")
-        self._final_ax.set_title("Final Corrected PATs")
-        self._final_ax.grid(True)
+        self._corrected_ax.set_xlabel("Time (s)")
+        self._corrected_ax.set_ylabel("PAT (s)")
+        self._corrected_ax.set_title("Final Corrected PATs")
+        self._corrected_ax.grid(True)
 
         self._sawtooth_ax1.sharex(self._sawtooth_ax2)
         self._sawtooth_ax2.sharex(self._final_ax)
         self._sawtooth_ax1.sharey(self._sawtooth_ax2)
         self._sawtooth_ax2.sharey(self._final_ax)
-
-        self._pat_series_ax.figure.canvas.draw()
-        self._sawtooth_ax1.figure.canvas.draw()
-        self._sawtooth_ax2.figure.canvas.draw()
-        self._final_ax.figure.canvas.draw()
+        self._corrected_ax.sharex(self._final_ax)
+        self._corrected_ax.sharey(self._final_ax)
 
         self._pat_series_ax.figure.tight_layout()
         self._sawtooth_ax1.figure.tight_layout()
         self._sawtooth_ax2.figure.tight_layout()
+        self._corrected_ax.figure.tight_layout()
         self._final_ax.figure.tight_layout()
+
+        self._pat_series_ax.figure.canvas.draw()
+        self._sawtooth_ax1.figure.canvas.draw()
+        self._sawtooth_ax2.figure.canvas.draw()
+        self._corrected_ax.figure.canvas.draw()
+        self._final_ax.figure.canvas.draw()
+
+    def _update_text(self):
+        self.p1.setText(f"{self.fitp1[1]:.3f}")
+        self.p2.setText(f"{self.fitp2[1]:.3f}")
+        self.ph1.setText(f"{self.fitp1[3]:.3f}")
+        self.ph2.setText(f"{self.fitp2[3]:.3f}")
+        self.a1.setText(f"{self.fitp1[0]:.4f}")
+        self.a2.setText(f"{self.fitp2[0]:.4f}")
+
+        self.text1.setText(
+            f"Sawtooth 1 fit: "
+            f"A={self.fitp1[0]:.4f}, "
+            f"Period={self.fitp1[1]:.2f}, "
+            f"Offset={self.fitp1[2]:.2f}, "
+            f"Phase={self.fitp1[3]:.2f}"
+        )
+        self.text2.setText(
+            f"Sawtooth 1 fit: "
+            f"A={self.fitp2[0]:.4f}, "
+            f"Period={self.fitp2[1]:.2f}, "
+            f"Offset={self.fitp2[2]:.2f}, "
+            f"Phase={self.fitp2[3]:.2f}"
+        )
 
 
 if __name__ == "__main__":
+    # path = "/home/ian/dev/bp-estimation/data/paper_results/"
+    path = "/home/ian/dev/bp-estimation/data/paper_results/"
+    files = os.listdir(path)
+    pats_fn = [f for f in files if f"_pats.csv" in f]
+    df = pd.read_csv(f"{path}/{pats_fn[10]}")
+    pids = df["patient_id"].unique()
+
     # Check whether there is already a running QApplication (e.g., if running
     # from an IDE).
     qapp = QtWidgets.QApplication.instance()
@@ -429,6 +475,12 @@ if __name__ == "__main__":
     pats_fn = [f for f in files if f"_pats.csv" in f]
     df = pd.read_csv(f"{path}/{pats_fn[10]}")
     pids = df["patient_id"].unique()
+
+    print(pats_fn[10])
+    print(pats_fn[10])
+    print(pats_fn[10])
+    print(pats_fn[10])
+    print(pats_fn[10])
 
     pats = df[df["patient_id"] == pids[1]]
 

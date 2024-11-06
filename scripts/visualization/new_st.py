@@ -34,7 +34,7 @@ def fit_sawtooth(x, y, period_sec=60):
     x_linspace = np.linspace(min(x), max(x), num=1000)
     x_st = x_linspace / x_linspace[-1]
 
-    a = (np.median(y) + 0.015) - (np.median(y) - 0.015)
+    a = (np.median(y) + 0.02) - (np.median(y) - 0.02)
     # a = 0.025
     period = (np.max(x) - np.min(x)) / period_sec
     offset = np.median(y)

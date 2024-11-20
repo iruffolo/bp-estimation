@@ -30,48 +30,17 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self.points = 1000
         self.start_time = 0
 
+        self._setup_ui()
+
+    def _setup_ui(self):
+
         layout = QtWidgets.QGridLayout(self._main)
 
-        ## Plotting Canvases
+        canvas = [FigureCanvas(Figure(figsize=(5, 3))) for _ in range(6)]
 
-        # Main canvas for entire PAT series
-        full_series_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(full_series_canvas, self), 0, 0, 1, 5)
-        layout.addWidget(full_series_canvas, 1, 0, 1, 6)
-
-        # Secondary canvas for first sawtooth fit
-        sawtooth1_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(sawtooth1_canvas, self), 2, 0)
-        layout.addWidget(sawtooth1_canvas, 3, 0)
-        self.text1 = QtWidgets.QLineEdit()
-        layout.addWidget(self.text1, 4, 0)
-
-        # Secondary canvas for second sawtooth fit
-        sawtooth2_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(sawtooth2_canvas, self), 2, 1)
-        layout.addWidget(sawtooth2_canvas, 3, 1)
-        self.text2 = QtWidgets.QLineEdit()
-        layout.addWidget(self.text2, 4, 1)
-
-        # Secondary canvas for second sawtooth fit
-        corrected_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(corrected_canvas, self), 2, 2)
-        layout.addWidget(corrected_canvas, 3, 2)
-        self.text2 = QtWidgets.QLineEdit()
-        layout.addWidget(self.text2, 4, 1)
-
-        # Final canvas for corrected PATs with both sawtooth fits applied
-        full_corrected_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout.addWidget(NavigationToolbar(full_corrected_canvas, self), 5, 0, 1, 2)
-        layout.addWidget(full_corrected_canvas, 6, 0, 1, 6)
-        ### Control Buttons on the right
-
-        # Create canvas for static and dynamic plots
-        self._pat_series_ax = full_series_canvas.figure.subplots()
-        self._sawtooth_ax1 = sawtooth1_canvas.figure.subplots()
-        self._sawtooth_ax2 = sawtooth2_canvas.figure.subplots()
-        self._corrected_ax = corrected_canvas.figure.subplots()
-        self._final_ax = full_corrected_canvas.figure.subplots()
+        ### Row 0 - Beat Matching display
+        layout.addWidget(NavigationToolbar(canvas[0], self), 0, 0, 1, 6)
+        layout.addWidget(canvas[0], 1, 0, 1, 6)
 
         # Dropdowns for device and patient selection
         vbutton_layout = QtWidgets.QVBoxLayout()
@@ -83,13 +52,37 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         vbutton_layout.addWidget(self.device_dropdown)
         vbutton_layout.addWidget(self.patient_dropdown)
 
+        ### Row 1 - PAT Series
+        layout.addWidget(NavigationToolbar(canvas[1], self), 2, 0, 1, 6)
+        layout.addWidget(canvas[1], 3, 0, 1, 6)
+
+        button_layout = QtWidgets.QVBoxLayout()
+        layout.addLayout(button_layout, 3, 6, 1, 2)
+
+        ### Row 2 - Sawtooths
+        layout.addWidget(NavigationToolbar(canvas[2], self), 4, 0)
+        layout.addWidget(canvas[2], 5, 0)
+
+        layout.addWidget(NavigationToolbar(canvas[3], self), 4, 1)
+        layout.addWidget(canvas[3], 5, 1)
+
+        layout.addWidget(NavigationToolbar(canvas[4], self), 4, 2)
+        layout.addWidget(canvas[4], 5, 2)
+
+        self.text1 = QtWidgets.QLineEdit()
+        layout.addWidget(self.text1, 6, 0)
+        self.text2 = QtWidgets.QLineEdit()
+        layout.addWidget(self.text2, 6, 1)
+
         # Buttons to step through dynamic plots and change window params
         gbutton_layout = QtWidgets.QGridLayout()
-        layout.addLayout(gbutton_layout, 3, 6, 1, 2)
+        layout.addLayout(gbutton_layout, 5, 6, 1, 2)
+
         step_button = QtWidgets.QPushButton("Step")
         step_button.setFixedSize(50, 30)
         step_button.clicked.connect(lambda: self._step_update(step=True))
         gbutton_layout.addWidget(step_button, 0, 0)
+
         reset_button = QtWidgets.QPushButton("Reset")
         reset_button.setFixedSize(50, 30)
         reset_button.clicked.connect(self._reset_dynamic)
@@ -106,10 +99,12 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         p1b = QtWidgets.QPushButton("Period")
         p1b.setFixedSize(50, 30)
         gbutton_layout.addWidget(p1b, 1, 0)
+
         self.p1 = QtWidgets.QLineEdit()
         self.p1.setFixedSize(50, 30)
         self.p1.textChanged.connect(lambda x: self._st_param_change(x, 1, 0))
         gbutton_layout.addWidget(self.p1, 1, 1)
+
         self.p2 = QtWidgets.QLineEdit()
         self.p2.setFixedSize(50, 30)
         self.p2.textChanged.connect(lambda x: self._st_param_change(x, 1, 1))
@@ -118,10 +113,12 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         ph1b = QtWidgets.QPushButton("Phase")
         ph1b.setFixedSize(50, 30)
         gbutton_layout.addWidget(ph1b, 2, 0)
+
         self.ph1 = QtWidgets.QLineEdit()
         self.ph1.setFixedSize(50, 30)
         self.ph1.textChanged.connect(lambda x: self._st_param_change(x, 3, 0))
         gbutton_layout.addWidget(self.ph1, 2, 1)
+
         self.ph2 = QtWidgets.QLineEdit()
         self.ph2.setFixedSize(50, 30)
         self.ph2.textChanged.connect(lambda x: self._st_param_change(x, 3, 1))
@@ -130,17 +127,90 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         a1b = QtWidgets.QPushButton("Amp")
         a1b.setFixedSize(50, 30)
         gbutton_layout.addWidget(a1b, 3, 0)
+
         self.a1 = QtWidgets.QLineEdit()
         self.a1.setFixedSize(50, 30)
         self.a1.textChanged.connect(lambda x: self._st_param_change(x, 0, 0))
         gbutton_layout.addWidget(self.a1, 3, 1)
+
         self.a2 = QtWidgets.QLineEdit()
         self.a2.setFixedSize(50, 30)
         self.a2.textChanged.connect(lambda x: self._st_param_change(x, 0, 1))
         gbutton_layout.addWidget(self.a2, 3, 2)
 
+        ### Row 3 - Corrected PAT Series
+        layout.addWidget(NavigationToolbar(canvas[5], self), 7, 0, 1, 2)
+        layout.addWidget(canvas[5], 8, 0, 1, 6)
+
+        # Create subplots for each canvas
+        self._beat_matching_ax = canvas[0].figure.subplots()
+        self._pat_series_ax = canvas[1].figure.subplots()
+        self._sawtooth_ax1 = canvas[2].figure.subplots()
+        self._sawtooth_ax2 = canvas[3].figure.subplots()
+        self._corrected_ax = canvas[4].figure.subplots()
+        self._final_ax = canvas[5].figure.subplots()
+
         # Call this at end after all buttons etc are created
         self._setup_plots()
+
+    def _setup_plots(self):
+        self._beat_matching_ax.set_xlabel("Time (s)")
+        self._beat_matching_ax.set_ylabel("PAT (s)")
+        self._beat_matching_ax.set_title(
+            f"Patient: {self.pid}\n"
+            f"Admit Date: {self.date.day}-{self.date.month}-{self.date.year}"
+        )
+        self._beat_matching_ax.grid(True)
+
+        self._pat_series_ax.set_xlabel("Time (s)")
+        self._pat_series_ax.set_ylabel("PAT (s)")
+        self._pat_series_ax.set_title("Pulse Arrival Time")
+        self._pat_series_ax.grid(True)
+
+        self._sawtooth_ax1.set_xlabel("Time (s)")
+        self._sawtooth_ax1.set_ylabel("PAT (s)")
+        self._sawtooth_ax1.set_title(
+            f"First sawtooth fit - {self.window_s / 60} min windows"
+        )
+        self._sawtooth_ax1.grid(True)
+
+        self._sawtooth_ax2.set_xlabel("Time (s)")
+        self._sawtooth_ax2.set_ylabel("PAT (s)")
+        self._sawtooth_ax2.set_title(
+            f"Second sawtooth fit - {self.window_s / 60} min windows"
+        )
+        self._sawtooth_ax2.grid(True)
+
+        self._corrected_ax.set_xlabel("Time (s)")
+        self._corrected_ax.set_ylabel("PAT (s)")
+        self._corrected_ax.set_title("Corrected Window")
+        self._corrected_ax.grid(True)
+
+        self._final_ax.set_xlabel("Time (s)")
+        self._final_ax.set_ylabel("PAT (s)")
+        self._final_ax.set_title("Corrected Pulse Arrival Times")
+        self._final_ax.grid(True)
+
+        self._beat_matching_ax.sharex(self._pat_series_ax)
+
+        self._sawtooth_ax1.sharex(self._sawtooth_ax2)
+        self._sawtooth_ax2.sharex(self._corrected_ax)
+        self._sawtooth_ax1.sharey(self._sawtooth_ax2)
+        self._sawtooth_ax2.sharey(self._corrected_ax)
+
+        self._beat_matching_ax.figure.tight_layout()
+        self._pat_series_ax.figure.tight_layout()
+        self._sawtooth_ax1.figure.tight_layout()
+        self._sawtooth_ax2.figure.tight_layout()
+        self._corrected_ax.figure.tight_layout()
+        self._final_ax.figure.tight_layout()
+
+        self._beat_matching_ax.figure.canvas.draw()
+        self._pat_series_ax.figure.canvas.draw()
+        self._sawtooth_ax1.figure.canvas.draw()
+        self._sawtooth_ax2.figure.canvas.draw()
+        self._corrected_ax.figure.canvas.draw()
+        self._final_ax.figure.canvas.draw()
 
     def add_patients(self, patients, callback, select_patient=None):
         self.patient_dropdown.clear()
@@ -404,51 +474,6 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._a4_p1 = self._final_ax.plot([], [], ".", markersize=1.0, color="green")[0]
 
         self._step_update(step=False)
-
-    def _setup_plots(self):
-        self._pat_series_ax.set_xlabel("Time (s)")
-        self._pat_series_ax.set_ylabel("PAT (s)")
-        self._pat_series_ax.set_title(
-            f"Patient: {self.pid}\n"
-            f"Admit Date: {self.date.day}-{self.date.month}-{self.date.year}"
-        )
-        self._pat_series_ax.grid(True)
-
-        self._sawtooth_ax1.set_xlabel("Time (s)")
-        self._sawtooth_ax1.set_ylabel("PAT (s)")
-        self._sawtooth_ax1.set_title(
-            f"First sawtooth fit - {self.window_s / 60} min windows"
-        )
-        self._sawtooth_ax1.grid(True)
-
-        self._sawtooth_ax2.set_xlabel("Time (s)")
-        self._sawtooth_ax2.set_ylabel("PAT (s)")
-        self._sawtooth_ax2.set_title(
-            f"Second sawtooth fit - {self.window_s / 60} min windows"
-        )
-        self._sawtooth_ax2.grid(True)
-
-        self._corrected_ax.set_xlabel("Time (s)")
-        self._corrected_ax.set_ylabel("PAT (s)")
-        self._corrected_ax.set_title("Final Corrected PATs")
-        self._corrected_ax.grid(True)
-
-        self._sawtooth_ax1.sharex(self._sawtooth_ax2)
-        self._sawtooth_ax2.sharex(self._corrected_ax)
-        self._sawtooth_ax1.sharey(self._sawtooth_ax2)
-        self._sawtooth_ax2.sharey(self._corrected_ax)
-
-        self._pat_series_ax.figure.tight_layout()
-        self._sawtooth_ax1.figure.tight_layout()
-        self._sawtooth_ax2.figure.tight_layout()
-        self._corrected_ax.figure.tight_layout()
-        self._final_ax.figure.tight_layout()
-
-        self._pat_series_ax.figure.canvas.draw()
-        self._sawtooth_ax1.figure.canvas.draw()
-        self._sawtooth_ax2.figure.canvas.draw()
-        self._corrected_ax.figure.canvas.draw()
-        self._final_ax.figure.canvas.draw()
 
     def _update_text(self):
         self.p1.setText(f"{self.fitp1[1]:.3f}")

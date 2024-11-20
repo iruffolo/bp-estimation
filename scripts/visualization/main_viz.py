@@ -21,13 +21,15 @@ class DataManger:
 
         pats = self.df[self.df["patient_id"] == pid]
 
+        print(pats.columns)
+
         x = pats["ecg_peaks"]
         y = pats["pat"]
 
         date = datetime.fromtimestamp(pats["ecg_peaks"].iloc[0])
         app.update_patient_data(x, y, date)
 
-    def device_change_callback(self, device_id):
+    def device_change_callback(self, device_id, pid=None):
         print(f"Device changed {device_id}")
         did = int(device_id)
 
@@ -36,7 +38,7 @@ class DataManger:
         self.df = pd.read_csv(f"{path}/{pats_fn}")
 
         pids = self.df["patient_id"].unique()
-        app.add_patients(pids, self.patient_change_callback)
+        app.add_patients(pids, self.patient_change_callback, pid)
 
 
 if __name__ == "__main__":
@@ -44,13 +46,19 @@ if __name__ == "__main__":
     qapp = QtWidgets.QApplication(sys.argv)
     app = ApplicationWindow(sys.argv)
 
-    path = "/home/ian/dev/bp-estimation/data/paper_results_short/"
-    # path = "/home/ian/dev/bp-estimation/data/paper_results/"
+    # path = "/home/ian/dev/bp-estimation/data/paper_results_short/"
+    path = "/home/ian/dev/bp-estimation/data/paper_results/"
+
+    default_pid = 31027
+    default_did = 80
 
     dm = DataManger(path)
     devices = list(range(74, 116))
 
-    app.add_devices(devices, dm.device_change_callback)
+    app.add_devices(devices, dm.device_change_callback, default_did, default_pid)
+
+    # dm.device_change_callback(default_did)
+    # dm.patient_change_callback(default_pid)
 
     app.show()
     app.activateWindow()

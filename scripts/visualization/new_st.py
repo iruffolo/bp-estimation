@@ -41,8 +41,8 @@ def fit_sawtooth(x, y, period_sec=60):
 
     lscale = 0.9
     uscale = 1.1
-    lower = [a * lscale, period * 0.5, offset * lscale, 0]
-    upper = [a * uscale, period * 1.5, offset * uscale, np.pi]
+    lower = [0.018, period * 0.95, offset * lscale, 0]
+    upper = [0.022, period * 1.05, offset * uscale, np.pi]
     bounds = (lower, upper)
 
     fitP, pcov = curve_fit(_create_sawtooth, x_scaled, y, bounds=bounds)

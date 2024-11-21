@@ -56,13 +56,31 @@ def get_patient_data(sdk, patient_id):
     print(data)
 
 
-def get_ppg_ecg_data(sdk, pid, dev, gap_tol):
-    """
-    Get PPG and ECG data for a specific patient and device
-    """
+def get_ppg_ecg_intervals_device(sdk, dev, gap_tol_nano):
 
-    gap_tol_nano = gap_tol * (10**9)
+    ecg_id = 3
+    ppg_id = 2
 
+    ecg_intervals = Intervals(
+        sdk.get_interval_array(
+            ecg_id,
+            device_id=dev,
+            gap_tolerance_nano=gap_tol_nano,
+        )
+    )
+    ppg_intervals = Intervals(
+        sdk.get_interval_array(
+            ppg_id,
+            device_id=dev,
+            gap_tolerance_nano=gap_tol_nano,
+        )
+    )
+    total_waveform_intervals = ecg_intervals.intersection(ppg_intervals)
+
+    return total_waveform_intervals.interval_arr
+
+
+def get_ppg_ecg_intervals_patient(sdk, pid, dev, gap_tol_nano):
     ecg_id = 3
     ppg_id = 2
 
@@ -93,6 +111,19 @@ def get_ppg_ecg_data(sdk, pid, dev, gap_tol):
     )
     total_waveform_intervals = ecg_intervals.intersection(ppg_intervals)
 
+    return total_waveform_intervals
+
+
+def get_ppg_ecg_data(sdk, pid, dev, gap_tol, window=None):
+    """
+    Get PPG and ECG data for a specific patient and device
+    """
+
+    ecg_id = 3
+    ppg_id = 2
+
+    total_waveform_intervals = get_ppg_ecg_intervals_patient(sdk, pid, dev, gap_tol)
+
     ecg = {"times": np.array([]), "values": np.array([])}
     ppg = {"times": np.array([]), "values": np.array([])}
 
@@ -100,19 +131,33 @@ def get_ppg_ecg_data(sdk, pid, dev, gap_tol):
 
         # Get ECG and PPG data for all the overlapping intervals
 
+        if window:
+            end = i[0] + window
+        else:
+            end = i[1]
+
         _, ecg_times, ecg_values = sdk.get_data(
-            measure_id=ecg_id, start_time_n=i[0], end_time_n=i[1], patient_id=pid
+            measure_id=ecg_id, start_time_n=i[0], end_time_n=end, patient_id=pid
         )
         ecg["times"] = np.concatenate((ecg["times"], ecg_times), axis=0)
         ecg["values"] = np.concatenate((ecg["values"], ecg_values), axis=0)
 
         _, ppg_times, ppg_values = sdk.get_data(
-            measure_id=ppg_id, start_time_n=i[0], end_time_n=i[1], patient_id=pid
+            measure_id=ppg_id, start_time_n=i[0], end_time_n=end, patient_id=pid
         )
         ppg["times"] = np.concatenate((ppg["times"], ppg_times), axis=0)
         ppg["values"] = np.concatenate((ppg["values"], ppg_values), axis=0)
 
-    return ppg, ecg
+    ecg_info = sdk.get_measure_info(ecg_id)
+    ppg_info = sdk.get_measure_info(ppg_id)
+    ecg_freq = int(ecg_info["freq_nhz"] / 10**9)
+    ppg_freq = int(ppg_info["freq_nhz"] / 10**9)
+
+    # Convert times to seconds
+    ppg["times"] = ppg["times"] / 10**9
+    ecg["times"] = ecg["times"] / 10**9
+
+    return ppg, ecg, ppg_freq, ecg_freq
 
 
 def make_patient_itr(

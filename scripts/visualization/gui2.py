@@ -30,11 +30,37 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self.points = 1000
         self.start_time = 0
 
-        self._setup_ui()
+        # Create main layout for GUI
+        main_layout = QtWidgets.QVBoxLayout(self._main)
 
-    def _setup_ui(self):
+        self.title = QtWidgets.QLabel("Patient X | Admit Date: X")
+        main_layout.addWidget(self.title)
 
-        layout = QtWidgets.QGridLayout(self._main)
+        # Create tabs for PAT and Raw data
+        tab = QtWidgets.QTabWidget()
+
+        main_layout.addWidget(tab)
+
+        pat_page = QtWidgets.QWidget()
+        pat_layout = QtWidgets.QGridLayout()
+        pat_page.setLayout(pat_layout)
+
+        raw_page = QtWidgets.QWidget()
+        raw_page_layout = QtWidgets.QGridLayout()
+        raw_page.setLayout(raw_page_layout)
+
+        tab.addTab(pat_page, "PAT")
+        tab.addTab(raw_page, "Raw Data")
+
+        self._setup_pat_ui(pat_layout)
+        self._setup_raw_ui(raw_page_layout)
+
+    # Make this another class?
+    def _setup_pat_ui(self, layout):
+        """
+        Setup the UI for the PAT data with plots and buttons etc.
+        given a layout page for a tab
+        """
 
         canvas = [FigureCanvas(Figure(figsize=(5, 3))) for _ in range(6)]
 
@@ -153,12 +179,81 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         # Call this at end after all buttons etc are created
         self._setup_plots()
 
+    def _setup_raw_ui(self, layout):
+        """
+        Setup the UI for the raw data with plots and buttons etc.
+        """
+
+        ppg_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        ecg_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+
+        layout.addWidget(NavigationToolbar(ppg_canvas, self), 0, 0)
+        layout.addWidget(ppg_canvas, 1, 0)
+
+        layout.addWidget(NavigationToolbar(ecg_canvas, self), 2, 0)
+        layout.addWidget(ecg_canvas, 3, 0)
+
+        self._ppg_ax = ppg_canvas.figure.subplots()
+        self._ecg_ax = ecg_canvas.figure.subplots()
+
+    def add_raw_data(self, ppg, ecg, ppg_peaks=None, ecg_peaks=None):
+        """
+        Add raw data to the plots
+        """
+        self._ppg_ax.clear()
+        self._ppg_ax.plot(ppg["times"], ppg["values"], marker=".", markersize=1.0)
+        self._ppg_ax.figure.canvas.draw()
+        if ppg_peaks is not None:
+            idx_ppg = np.nonzero(np.in1d(ppg["times"], ppg_peaks))[0]
+
+            self._ppg_ax.plot(ppg["times"][idx_ppg], ppg["values"][idx_ppg], "x")
+
+        self._ecg_ax.clear()
+        self._ecg_ax.plot(ecg["times"], ecg["values"], marker=".", markersize=1.0)
+        self._ecg_ax.figure.canvas.draw()
+        if ecg_peaks is not None:
+            idx_ecg = np.nonzero(np.in1d(ecg["times"], ecg_peaks))[0]
+            self._ecg_ax.plot(ecg["times"][idx_ecg], ecg["values"][idx_ecg], "x")
+
+        self._ppg_ax.set_xlabel("Time (s)")
+        self._ppg_ax.set_ylabel("Value")
+        self._ppg_ax.set_title("PPG")
+        self._ppg_ax.grid(True)
+
+        self._ecg_ax.set_xlabel("Time (s)")
+        self._ecg_ax.set_ylabel("Value")
+        self._ecg_ax.set_title("ECG")
+        self._ecg_ax.grid(True)
+
+        self._ppg_ax.sharex(self._ecg_ax)
+
+    def add_pat_data(self, pats, c_pats, cmap=None):
+        """
+        Add PAT values to the plot
+        """
+
+        self._pat_series_ax.clear()
+
+        self._pat_series_ax.scatter(
+            pats["times"], pats["values"], s=0.8, c=cmap, cmap="Reds"
+        )
+
+        self._pat_series_ax.scatter(c_pats["times"], c_pats["values"], s=0.8, c="blue")
+
+        self._pat_series_ax.set_xlabel("Time (s)")
+        self._pat_series_ax.set_ylabel("Value")
+        self._pat_series_ax.set_title("PAT")
+        self._pat_series_ax.grid(True)
+
+        pass
+
     def _setup_plots(self):
         self._beat_matching_ax.set_xlabel("Time (s)")
         self._beat_matching_ax.set_ylabel("PAT (s)")
         self._beat_matching_ax.set_title(
-            f"Patient: {self.pid}\n"
-            f"Admit Date: {self.date.day}-{self.date.month}-{self.date.year}"
+            f"Patient: {self.pid}   |    "
+            f"Admit Date: {self.date.day}-{self.date.month}-{self.date.year}\n"
+            f"Beat Matching"
         )
         self._beat_matching_ax.grid(True)
 
@@ -212,25 +307,14 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._corrected_ax.figure.canvas.draw()
         self._final_ax.figure.canvas.draw()
 
-    def add_patients(self, patients, callback, select_patient=None):
-        self.patient_dropdown.clear()
-
-        print("Adding Patients")
-        for p in sorted(patients):
-            self.patient_dropdown.addItem(f"{int(p)}")
-
-        self.patient_cb = callback
-        self.patient_dropdown.activated.connect(self._patient_change)
-
-        if select_patient:
-            self.patient_dropdown.setCurrentText(str(select_patient))
-
-        callback(self.patient_dropdown.currentText())
-
-    def add_devices(self, devices, callback, select_device=None, select_patient=None):
+    def add_devices(self, devices, callback, select_device=None):
+        """
+        Add devices to the dropdown and set the callback for when a new
+        device is selected.
+        This only needs to be called once on startup.
+        """
         self.device_dropdown.clear()
 
-        print("Adding Devices")
         for d in sorted(devices):
             self.device_dropdown.addItem(f"{int(d)}")
 
@@ -240,15 +324,37 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         if select_device:
             self.device_dropdown.setCurrentText(str(select_device))
 
-        callback(self.device_dropdown.currentText(), select_patient)
+        callback(self.device_dropdown.currentText())
+
+    def add_patients(self, patients, callback, select_patient=None):
+        """
+        Add patients to the dropdown and set the callback for when a new
+        patient is selected.
+        This can be called at any time to refresh patient list when a new device
+        is selected.
+        """
+        self.patient_dropdown.clear()
+
+        for p in sorted(patients):
+            self.patient_dropdown.addItem(f"{int(p)}")
+
+        self.patient_cb = callback
+        self.patient_dropdown.activated.connect(self._patient_change)
+
+        if select_patient:
+            self.patient_dropdown.setCurrentText(str(select_patient))
 
     def _device_change(self, device_id):
-        # Callback to update device data
+        """
+        Callback to update device data
+        """
         self.dev = int(self.device_dropdown.currentText())
         self.device_cb(self.dev)
 
     def _patient_change(self, patient_id):
-        # Callback to update patient data
+        """
+        Callback to update patient data
+        """
         self.pid = int(self.patient_dropdown.currentText())
         self.patient_cb(self.pid)
 
@@ -294,7 +400,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
             return
 
     def update_patient_data(self, times, pats, date):
-        # Scale x-axis to start at 0
+        # Scale x-axis to start at
         self.x = times - times.iloc[0]
         self.y = pats
 

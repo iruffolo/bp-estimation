@@ -1,24 +1,32 @@
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy
-import scipy.signal
+from scipy import signal
 from scipy.optimize import curve_fit, differential_evolution
 
 
-def _create_sawtooth(x, A, period, offset, phase):
+def create_sawtooth(x, A, period, offset, phase):
     """
     Create a sawtooth wave
 
     :param x: x values
-    :param A: Amplitude
-    :param freq: Frequency
-    :param offset: Offset
+    :param A: Amplitude (ms)
+    :param freq: Period (s)
+    :param offset: Offset (s)
+    :param phase: Phase shift (radians)
     """
-    return A * scipy.signal.sawtooth(2 * np.pi * period * x - phase, width=1) + offset
+
+    x_scaled = x / x[-1]
+    freq_scaled = (np.max(x) - np.min(x)) / period
+
+    A_sec = A / 1000
+
+    st = A_sec * signal.sawtooth((2 * np.pi * freq_scaled) * x_scaled - phase) + offset
+
+    return st
 
 
-def fit_sawtooth(x, y, period_sec=60):
+def fit_sawtooth(x, y, period=60, amp=20):
     """
     Fit a sawtooth wave to the data
 
@@ -26,29 +34,18 @@ def fit_sawtooth(x, y, period_sec=60):
     :param y: y values
     """
 
-    # Shift x to start at 0
-    # x = x - x.iloc[0]
-
-    # Must scale x between 0 and 1
-    x_scaled = x.values / x.iloc[-1]
-    x_linspace = np.linspace(min(x), max(x), num=1000)
-    x_st = x_linspace / x_linspace[-1]
-
-    a = (np.median(y) + 0.02) - (np.median(y) - 0.02)
-    # a = 0.025
-    period = (np.max(x) - np.min(x)) / period_sec
     offset = np.median(y)
 
-    lscale = 0.9
-    uscale = 1.1
-    lower = [0.018, period * 0.95, offset * lscale, 0]
-    upper = [0.022, period * 1.05, offset * uscale, np.pi]
+    lower = [10, period - 20, offset - 0.02, 0]
+    upper = [30, period + 20, offset + 0.02, 2 * np.pi]
+
     bounds = (lower, upper)
 
-    fitP, pcov = curve_fit(_create_sawtooth, x_scaled, y, bounds=bounds)
+    io = [amp, period, offset, 0]
 
-    print(f"Fitted parameters: {fitP}")
-    model = _create_sawtooth(x_scaled, *fitP)
+    fitP, pcov = curve_fit(create_sawtooth, x, y, p0=io, bounds=bounds)
+
+    model = create_sawtooth(x, *fitP)
 
     return model, fitP
 
@@ -89,12 +86,12 @@ if __name__ == "__main__":
     lower = [a * lscale, period * lscale, offset * lscale, 0]
     upper = [a * uscale, period * uscale, offset * uscale, 2 * np.pi]
     bounds = (lower, upper)
-    fitP, pcov = curve_fit(_create_sawtooth, x_scaled, y, bounds=bounds)
+    fitP, pcov = curve_fit(create_sawtooth, x_scaled, y, bounds=bounds)
 
     print(f"Fitted parameters: {fitP}")
 
-    y_st1 = _create_sawtooth(x_scaled, *fitP)
-    y_st2 = _create_sawtooth(x_scaled, a, period, offset, phase)
+    y_st1 = create_sawtooth(x_scaled, *fitP)
+    y_st2 = create_sawtooth(x_scaled, a, period, offset, phase)
     e1 = sawtooth_error(y, y_st1)
     e2 = sawtooth_error(y, y_st2)
     print(f"Error 1: {e1}")
@@ -104,7 +101,7 @@ if __name__ == "__main__":
 
     best = fitP[3]
     for ps in phase_shifts:
-        y_st = _create_sawtooth(x_scaled, a, period, offset, ps)
+        y_st = create_sawtooth(x_scaled, a, period, offset, ps)
         e = sawtooth_error(y, y_st)
 
         if e < e1:
@@ -114,16 +111,16 @@ if __name__ == "__main__":
     print(f"Best phase: {best}")
     print(f"Old phase: {fitP[3]}")
 
-    y_st1 = _create_sawtooth(x_st, *fitP)
-    y_st2 = _create_sawtooth(x_st, fitP[0], fitP[1], fitP[2], best)
+    y_st1 = create_sawtooth(x_st, *fitP)
+    y_st2 = create_sawtooth(x_st, fitP[0], fitP[1], fitP[2], best)
     plt.plot(x_linspace, y_st1, "--", color="green")
     plt.plot(x_linspace, y_st2, "--", color="red")
 
     plt.show()
 
-    # fitP, pcov = curve_fit(_create_sawtooth, x_scale, y, ip)
+    # fitP, pcov = curve_fit(create_sawtooth, x_scale, y, ip)
     # fitP, pcov = curve_fit(
-    #     _create_sawtooth,
+    #     create_sawtooth,
     #     x_scale,
     #     y,
     #     ip,
@@ -131,9 +128,9 @@ if __name__ == "__main__":
     #     method="dogbox",
     # )
     # print(f"Fitted parameters: {fitP}")
-    # model = _create_sawtooth(x_scale, *fitP)
+    # model = create_sawtooth(x_scale, *fitP)
     # x_st = np.linspace(min(x), max(x), num=200)
-    # y_st = _create_sawtooth(x_st, *fitP)
+    # y_st = create_sawtooth(x_st, *fitP)
     # plt.plot(x_st, y_st, "--")
 
     # # Random experiment - Scale period with X length

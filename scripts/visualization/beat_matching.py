@@ -5,6 +5,7 @@ import heartpy as hp
 import matplotlib.pyplot as plt
 import neurokit2 as nk
 import numpy as np
+import pandas as pd
 from atriumdb import AtriumSDK
 from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
@@ -71,7 +72,8 @@ def get_quality_index(signal, min_hr=20, max_hr=300):
     Get quality of signal based on the interbeat intervals and change in HR
 
     :param signal: Signal to check
-    :param threshold: Threshold for change in HR
+    :param min_hr: Minimum HR
+    :param max_hr: Maximum HR
 
     :return: Quality index
     """
@@ -96,6 +98,7 @@ class MatchedPeak:
     n_peaks: int = np.nan
     ibi: float = np.nan
     confidence: float = np.nan
+    possible_pats: list[float] = field(default_factory=list)
 
 
 def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_time=1):
@@ -113,7 +116,7 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
     # Precalculate quality index for entire PPG signal
     ppg_quality = get_quality_index(ppg_peak_times)
 
-    matching_peaks = list()
+    matching_beats = list()
 
     for i in range(ecg_peak_times.size - wsize):
 
@@ -146,100 +149,61 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
             )
             best_match = np.argmin(euclidean)
 
+            # Return all possible PATs for each peak in search window
+            possible_pats = np.array(
+                [ppg_peak_times[idx + j] - ecg_peak_times[i] for j in range(ssize)]
+            )
+
             ibi = np.diff(ecg_peak_times[i : i + wsize])
-            confidence = np.sum(ibi)
+            confidence = np.sum(ibi) / euclidean[best_match]
 
-            m_peak = MatchedPeak(i, idx, euclidean, best_match, ibi, confidence)
-            matching_peaks.append(m_peak)
+            m_peak = MatchedPeak(
+                i, idx, euclidean, best_match, ibi, confidence, possible_pats
+            )
+            matching_beats.append(m_peak)
 
-    return matching_peaks
+    return matching_beats
 
 
-def calculate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.250):
+def correct_pats(pats_df, matching_beats, pat_range=0.100):
     """
     Calculate Pulse Arrival Time
 
-    :param ecg: ECG signal
-    :param ecg_freq: Frequency of ECG signal
-    :param ppg: PPG signal
-    :param ppg_freq: Frequency of PPG signal
-    :param pat_range: Range PAT can deviate from median within window (seconds)
-    :param ssize: Number of peaks to search ahead
+    :param matching_beats: Pandas df of PATs
 
-    :return: Array of PAT
+    :return: corrected PATs
     """
 
-    # Find peaks in ECG and PPG signals
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-        ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
+    pats_df = pd.DataFrame(pats_df)
 
-    # assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
-    # assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
-
-    # Match ppg peaks to ecg peaks
-    ssize = 6
-    matching_peaks = get_matching_peaks(ecg_peak_times, ppg_peak_times, ssize=ssize)
-
-    # Calculate PAT for each matched peak
-    pats = {
-        "times": np.zeros([len(matching_peaks)]),
-        "values": np.zeros([len(matching_peaks)]),
-    }
-    naive_pats = {
-        "times": np.zeros([len(matching_peaks)]),
-        "values": np.zeros([len(matching_peaks)]),
-    }
-
-    for i, m in enumerate(matching_peaks):
-        pat = (
-            ppg_peak_times[m.nearest_ppg_peak + m.n_peaks] - ecg_peak_times[m.ecg_peak]
-        )
-
-        pats["times"][i] = ecg_peak_times[m.ecg_peak]
-        pats["values"][i] = pat
-        naive_pats["times"][i] = ecg_peak_times[m.ecg_peak]
-        naive_pats["values"][i] = (
-            ppg_peak_times[m.nearest_ppg_peak] - ecg_peak_times[m.ecg_peak]
-        )
-
-    # Use median as expected value to correct outliers (i.e. mismatched beats)
-    expected = np.median(pats["values"])
+    expected = np.median(pats_df["values"][pats_df["confidence"] > 0.7])
+    print(f"Expected PAT: {expected}")
 
     num_corrected = 0
     tobedeleted = list()
 
-    for i, pat in enumerate(pats["values"]):
+    for i, pat in enumerate(pats_df["values"]):
 
         # PAT outside expected range, correct it
         if not (expected - pat_range < pat < expected + pat_range):
 
-            m = matching_peaks[i]
+            m = matching_beats[i]
 
             best = 0
-            for s in range(ssize):
-                new_pat = (
-                    ppg_peak_times[m.nearest_ppg_peak + s] - ecg_peak_times[m.ecg_peak]
-                )
+            for new_pat in m.possible_pats:
 
                 # Best PAT is selected as closest to expected value over search
                 if abs(new_pat - expected) < abs(best - expected):
                     best = new_pat
 
             if expected - pat_range < best < expected + pat_range:
-                # print(f"Good correction {pat} -> {best}")
-                pats["values"][i] = best
+                pats_df.loc[i, "values"] = best
                 num_corrected += 1
 
             # Couldn't find a good enough correction, remove point
             else:
-                # print(f"Cant find correction, destroying {pat}")
                 tobedeleted.append(i)
 
-    pats["times"] = np.delete(pats["times"], tobedeleted)
-    pats["values"] = np.delete(pats["values"], tobedeleted)
-    # naive_pats["times"] = np.delete(naive_pats["times"], tobedeleted)
-    # naive_pats["values"] = np.delete(naive_pats["values"], tobedeleted)
+    pats_df.drop(tobedeleted, inplace=True)
 
-    return pats, naive_pats, num_corrected, ecg_peak_times, ppg_peak_times
+    return pats_df, num_corrected

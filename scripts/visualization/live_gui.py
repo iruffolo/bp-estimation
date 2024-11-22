@@ -1,11 +1,13 @@
 import sys
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
-from beat_matching import beat_matching, calculate_pat, peak_detect, rpeak_detect_fast
+from beat_matching import beat_matching, correct_pats, peak_detect, rpeak_detect_fast
 from gui2 import ApplicationWindow
 from matplotlib.backends.qt_compat import QtWidgets
+from new_st import create_sawtooth, fit_sawtooth
 from utils.atriumdb_helpers import (
     get_ppg_ecg_data,
     get_ppg_ecg_intervals_device,
@@ -20,13 +22,18 @@ class DataManager:
 
         self.verbose = verbose
 
-        # Window size in nanoseconds
+        # Window and gap size for data pull
         self.window_size_nano = 60 * 60 * (10**9)
-
-        # Gap tolerance in nanoseconds
         self.gap_tol_nano = 10 * 60 * (10**9)
 
         self.ssize = 6
+
+        ## Params for stepping through dynamic plots
+        self.index = 0
+        self.step = 20 * 60  # 10 minutes
+        self.window_s = 20 * 60  # 30 minutes
+        self.points = 1000
+        self.start_time = 0
 
         # print_all_measures(sdk)
         self.devices = list(sdk.get_all_devices().keys())
@@ -37,6 +44,14 @@ class DataManager:
         # Initalise the device list
         self.app.add_devices(self.devices, self.device_change_cb, self.dev)
 
+        self.app.set_button_callbacks(
+            self.step_cb,
+            self.reset_cb,
+            self.window_change_cb,
+            self.sawtooth_cb,
+            self.update_cb,
+        )
+
     def _update_patient_list(self):
         """
         Get the list of patients for a given device
@@ -44,7 +59,7 @@ class DataManager:
 
         iarr = get_ppg_ecg_intervals_device(self.sdk, self.dev, self.gap_tol_nano)
 
-        # Filter patients that have valid overlapping ecg/ppg data
+        # Filter patients that have valid overlapping self.ecg/self.ppg data
         valid_patients = []
         for i in iarr:
             map = sdk.get_device_patient_data(
@@ -56,7 +71,7 @@ class DataManager:
                 for m in map:
                     valid_patients.append(m[1])
 
-            if len(valid_patients) > 10:
+            if len(valid_patients) > 50:
                 break
 
         self.patients = np.unique(valid_patients)
@@ -80,6 +95,49 @@ class DataManager:
         self._update_patient_list()
         self.patient_change_cb(self.pid)
 
+    def step_cb(self):
+        print("Step cb")
+        pass
+        return
+
+    def reset_cb(self):
+        print("Reset cb")
+        # self.start_time = self.x.iloc[0]
+        # self._step_update(step=False)
+
+    def update_cb(self):
+        self.update_sawtooth_plots()
+
+    def window_change_cb(self, window_size):
+        # Only update if window is a valid int
+        try:
+            new_window = int(window_size) * 60
+            if new_window <= 0:
+                new_window = 10 * 60
+            print(f"Window size changed to {window_size}")
+            self.window_s = new_window
+            self.update_window()
+            self.sawtooth_one()
+            self.sawtooth_two()
+        except ValueError:
+            return
+
+    def sawtooth_cb(self, value, param, st):
+        try:  # Ensure input is a number
+            new_val = float(value)
+            if new_val > 0 or param == 3 or param == 0:
+
+                if st == 0:
+                    self.fitp1[param] = new_val
+                    self.sawtooth_one(fit=False)
+                    self.sawtooth_two(fit=True)
+                elif st == 1:
+                    self.fitp2[param] = new_val
+                    self.sawtooth_two(fit=False)
+
+        except ValueError:
+            return
+
     def update_patient_data(self):
         """
         Get new patient data from database, calculate inital beat matching and
@@ -87,103 +145,138 @@ class DataManager:
         """
 
         print("Getting raw data")
-        ppg, ecg, ppg_freq, ecg_freq = get_ppg_ecg_data(
+        self.ppg, self.ecg, self.ppg_freq, self.ecg_freq = get_ppg_ecg_data(
             self.sdk,
             pid=self.pid,
             dev=self.dev,
             gap_tol=self.gap_tol_nano,
             window=self.window_size_nano,
         )
+        self.date = datetime.fromtimestamp(self.ecg["times"][0])
+        self.app.set_title(f"Patient {self.pid} Date: {self.date}")
 
         # Remove offset from times
-        ppg["times"] = ppg["times"] - ppg["times"][0]
-        ecg["times"] = ecg["times"] - ecg["times"][0]
+        self.ppg["times"] = self.ppg["times"] - self.ppg["times"][0]
+        self.ecg["times"] = self.ecg["times"] - self.ecg["times"][0]
 
-        print("Calculating Peaks")
-        self.ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-        self.ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
+        self.print("Calculating Peaks")
+        self.ecg_peak_times = rpeak_detect_fast(
+            self.ecg["times"], self.ecg["values"], self.ecg_freq
+        )
+        self.ppg_peak_times = peak_detect(
+            self.ppg["times"], self.ppg["values"], self.ppg_freq
+        )
 
-        app.add_raw_data(ppg, ecg, self.ppg_peak_times, self.ecg_peak_times)
+        self.print("Adding raw data to GUI")
+        self.app.plot_raw_data(
+            self.ppg, self.ecg, self.ppg_peak_times, self.ecg_peak_times
+        )
+
+        # Calculate beat matching and PATs
+        self.beat_matching()
+
+        # Plot all the results
+        self.app.plot_beat_match_data(self.all_pats)
+        self.app.plot_pat_data(self.pats, self.c_pats_df, self.cmap)
+
+        # Create smaller window slice for sawtooth fitting
+        self.start_time = 0
+        self.update_window()
+
+        self.sawtooth_one()
+        self.sawtooth_two()
+
+        self.update_sawtooth_plots()
+
+    def update_sawtooth_plots(self):
+        app.plot_sawtooth_one(self.x, self.y, self.x_ls, self.y_st1, self.fitp1)
+        app.plot_sawtooth_two(self.x, self.fixed_st1, self.x_ls, self.y_st2, self.fitp2)
+        app.plot_corrected(self.x, self.corrected_window)
+
+        self.app.update_button_text(self.fitp1, self.fitp2, self.window_s / 60)
+
+    def update_window(self):
+        """
+        Update the window size and start time for the data slice
+        """
+
+        x = self.c_pats_df["times"].reset_index(drop=True)
+        y = self.c_pats_df["values"].reset_index(drop=True)
+
+        # Shift the pats to the left based on window size
+        end_time = self.start_time + self.window_s
+        idx = np.where((x >= self.start_time) & (x <= end_time))[0]
+        if not idx.size:
+            print("Window out of range, do nothing")
+            return
+
+        self.x = x.iloc[idx]
+        self.y = y.iloc[idx]
+
+        # Create shifted and scaled x values for sawtooth fitting
+        self.x_shift = self.x.values - self.x.iloc[0]
+
+        self.x_ls = np.linspace(min(self.x_shift), max(self.x_shift), num=500)
+
+        # Shift x values back to original for plotting
+        self.x_st_plot = self.x_ls + self.x.iloc[0]
+
+    def beat_matching(self):
+        """ """
 
         self.matching_beats = beat_matching(
             self.ecg_peak_times, self.ppg_peak_times, ssize=self.ssize
         )
-        # print(f"Matching Peaks: {self.matching_beats}")
 
-        # euc = [m.distance[m.n_peaks] for m in self.matching_beats]
-        # for e in euc:
-        #     print(e)
-        # euc = (np.array(euc) - np.min(euc)) / (np.max(euc) - np.min(euc))
+        # Create a df for plotting all possible beat matching PATs
+        self.all_pats = pd.DataFrame(
+            [m.possible_pats for m in self.matching_beats],
+            columns=[f"{i + 1} beats" for i in range(self.ssize)],
+        )
+        self.all_pats["times"] = [
+            self.ecg_peak_times[m.ecg_peak] for m in self.matching_beats
+        ]
+        self.all_pats.set_index("times", inplace=True)
 
-        cmap = [m.confidence / m.distance[m.n_peaks] for m in self.matching_beats]
-        cmap = (np.array(cmap) - np.min(cmap)) / (np.max(cmap) - np.min(cmap))
-        print(f"Confidence: {cmap}")
-        for c in cmap:
-            print(c)
-
-        # Calculate PAT for each matched peak
+        # Select the best match in the beatmatching for actual PAT values
         self.pats = {
-            "times": np.zeros([len(self.matching_beats)]),
-            "values": np.zeros([len(self.matching_beats)]),
-            "confidence": np.zeros([len(self.matching_beats)]),
+            "times": [self.ecg_peak_times[m.ecg_peak] for m in self.matching_beats],
+            "values": [m.possible_pats[m.n_peaks] for m in self.matching_beats],
+            "confidence": [m.confidence for m in self.matching_beats],
         }
 
-        for i, m in enumerate(self.matching_beats):
-            pat = (
-                self.ppg_peak_times[m.nearest_ppg_peak + m.n_peaks]
-                - self.ecg_peak_times[m.ecg_peak]
+        # Correct the PATs
+        self.c_pats_df, _ = correct_pats(
+            self.pats, self.matching_beats, pat_range=0.100
+        )
+
+        cmap = [m.confidence for m in self.matching_beats]
+        self.cmap = (np.array(cmap) - np.min(cmap)) / (np.max(cmap) - np.min(cmap))
+
+    def sawtooth_one(self, fit=True):
+
+        if fit:
+            self.st1, self.fitp1 = fit_sawtooth(self.x_shift, self.y)
+        else:
+            self.st1 = create_sawtooth(self.x_shift, *self.fitp1)
+
+        self.fixed_st1 = (self.y - self.st1) + self.fitp1[2]
+
+        # Sawtooth y values for plotting
+        self.y_st1 = create_sawtooth(self.x_st_plot, *self.fitp1)
+
+    def sawtooth_two(self, fit=True):
+        if fit:
+            self.st2, self.fitp2 = fit_sawtooth(
+                self.x_shift, self.fixed_st1, period=200, amp=15
             )
+        else:
+            self.st2 = create_sawtooth(self.x_shift, *self.fitp2)
 
-            self.pats["times"][i] = self.ecg_peak_times[m.ecg_peak]
-            self.pats["values"][i] = pat
-            self.pats["confidence"][i] = cmap[i]
+        self.corrected_window = (self.fixed_st1 - self.st2) + self.fitp2[2]
 
-        self.c_pats = self.correct_pats()
-
-        app.add_pat_data(self.pats, self.c_pats, cmap)
-
-    def correct_pats(self, pat_range=0.100):
-        """
-        Correct PATs that are outside the expected range
-        """
-
-        c_pats_df = pd.DataFrame(self.pats)
-
-        # Use median as expected value to correct outliers (i.e. mismatched beats)
-        expected = np.median(c_pats_df["values"][c_pats_df["confidence"] > 0.7])
-        print(f"Expected PAT: {expected}")
-
-        tobedeleted = []
-
-        for i, pat in enumerate(c_pats_df["values"]):
-
-            # PAT outside expected range, correct it
-            if not (expected - pat_range < pat < expected + pat_range):
-
-                m = self.matching_beats[i]
-
-                best = 0
-                for s in range(self.ssize):
-                    new_pat = (
-                        self.ppg_peak_times[m.nearest_ppg_peak + s]
-                        - self.ecg_peak_times[m.ecg_peak]
-                    )
-
-                    # Best PAT is selected as closest to expected value over search
-                    if abs(new_pat - expected) < abs(best - expected):
-                        best = new_pat
-
-                if expected - pat_range < best < expected + pat_range:
-                    c_pats_df.loc[i, "values"] = best
-
-                # Couldn't find a good enough correction, remove point
-                else:
-                    # print(f"Cant find correction, destroying {pat}")
-                    tobedeleted.append(i)
-
-        c_pats_df = c_pats_df.drop(tobedeleted)
-
-        return c_pats_df
+        # Sawtooth y values for plotting
+        self.y_st2 = create_sawtooth(self.x_st_plot, *self.fitp2)
 
     def print(self, *args, **kwargs):
         if self.verbose:

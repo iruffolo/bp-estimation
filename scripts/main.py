@@ -7,15 +7,16 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
+from numpy.polynomial import Polynomial
+from scipy.stats import pearsonr, spearmanr
+from sklearn import linear_model
+
 from correlation import create_aligned_data
 from data_quality import DataValidator
-from numpy.polynomial import Polynomial
 from pat import calclulate_pat
 from plotting.slopes import plot_slopes
 from plotting.waveforms import plot_waveforms
 from sawtooth import fit_sawtooth
-from scipy.stats import pearsonr, spearmanr
-from sklearn import linear_model
 from utils.atriumdb_helpers import (
     make_device_itr,
     make_device_itr_all_signals,
@@ -36,7 +37,7 @@ def process_pat(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/results/paper_results/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/andrew/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -87,6 +88,18 @@ def process_pat(sdk, dev, itr, early_stop=None):
             if pats["times"].size < 500:
                 log.log_status(WindowStatus.INSUFFICIENT_PATS)
                 continue
+
+            # if np.median(pats["values"]) < 0.5 or np.median(pats["values"]) > 2:
+            #     print(pats)
+            #     print(naive_pats)
+            #     print(f"pats: {len(pats)}")
+            #     print(f"naive_pats: {len(naive_pats)}")
+            #     print(f"matching_peaks: {len(matching_peaks)}")
+            #     print(f"ecg_peak_times: {len(ecg_peak_times)}")
+            #     print(f"ppg_peak_times: {len(ppg_peak_times)}")
+            #     # # Debug plot
+            #     plot_waveforms(ecg, ppg, abp, show=True)
+            #     exit()
 
             # Get Sawtooth and correct PATs
             st, params = fit_sawtooth(pats["times"], pats["values"], plot=False)
@@ -154,20 +167,36 @@ def process_pat(sdk, dev, itr, early_stop=None):
                 },
                 f"naive_pats",
             )
-            # log.log_raw_data(
-            #     {
-            #         "patient_id": np.full_like(ecg_times, w.patient_id),
-            #         "ecg_peaks": ecg_times,
-            #     },
-            #     f"ecg_peaks",
-            # )
-            # log.log_raw_data(
-            #     {
-            #         "patient_id": np.full_like(ppg_times, w.patient_id),
-            #         "ppg_peaks": ppg_times,
-            #     },
-            #     f"ppg_peaks",
-            # )
+            log.log_raw_data(
+                {
+                    "patient_id": np.full_like(ecg_times, w.patient_id),
+                    "ecg_peaks": ecg_times,
+                },
+                f"ecg_peaks",
+            )
+            log.log_raw_data(
+                {
+                    "patient_id": np.full_like(ppg_times, w.patient_id),
+                    "ppg_peaks": ppg_times,
+                },
+                f"ppg_peaks",
+            )
+            log.log_raw_data(
+                {
+                    "patient_id": np.full_like(abp["times"], w.patient_id),
+                    "abp_time": abp["times"],
+                    "abp_value": abp["values"],
+                },
+                f"abp",
+            )
+            log.log_raw_data(
+                {
+                    "patient_id": np.full_like(sbp["times"], w.patient_id),
+                    "sbp_time": sbp["times"],
+                    "sbp_value": sbp["values"],
+                },
+                f"sbp",
+            )
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -210,7 +239,7 @@ def run(local_dataset, window_size, gap_tol, device):
         gap_tol,
         device=device,
         pid=None,
-        prefetch=100,
+        prefetch=50,
         shuffle=False,
         start=None,
         end=None,
@@ -234,12 +263,12 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 30 * 60  # 30 min
+    window_size = 5 * 60 * 60  # 30 min
     gap_tol = 30 * 60  # 30 min to reduce overlapping windows with gap tol
 
-    # itr = make_device_itr_all_signals(sdk, window_size, gap_tol, 80, shuffle=True)
-    # process_pat(sdk, 80, itr, early_stop=100)
-    # exit()
+    itr = make_device_itr_all_signals(sdk, window_size, gap_tol, 80, shuffle=False)
+    process_pat(sdk, 80, itr, early_stop=500)
+    exit()
 
     num_cores = 15  # len(devices)
 

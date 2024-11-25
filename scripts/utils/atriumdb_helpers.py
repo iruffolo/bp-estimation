@@ -259,6 +259,88 @@ def make_device_itr(
     return itr
 
 
+def make_device_itr_ecg_ppg(
+    sdk,
+    window_size,
+    gap_tol,
+    device=None,
+    prefetch=10,
+):
+    """
+    Creates new SDK instance and iterator for a specific device
+
+    :param sdk: AtriumSDK instance
+    :param device: Device ID
+    :param window_size: Window size in nanoseconds
+    :param gap_tol: Gap tolerance in nanoseconds
+
+    :return: Dictionary of pulse arrival times for each patient in device
+    """
+
+    print(f"Building dataset, device: {device}")
+
+    # ECG/PPG measure ids
+    ecg_id = 3
+    ppg_id = 2
+
+    # Create measures list
+    measure_ids = [ecg_id, ppg_id]
+    measures = [
+        {
+            "tag": sdk.get_measure_info(measure_id)["tag"],
+            "freq_nhz": sdk.get_measure_info(measure_id)["freq_nhz"],
+            "units": sdk.get_measure_info(measure_id)["unit"],
+        }
+        for measure_id in measure_ids
+    ]
+
+    gap_tol_nano = gap_tol * (10**9)
+
+    ecg_intervals = Intervals(
+        sdk.get_interval_array(
+            ecg_id,
+            device_id=device,
+            patient_id=pid,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start,
+            end=end,
+        )
+    )
+    ppg_intervals = Intervals(
+        sdk.get_interval_array(
+            ppg_id,
+            device_id=device,
+            patient_id=pid,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start,
+            end=end,
+        )
+    )
+
+    total_waveform_intervals = ecg_intervals.intersection(ppg_intervals)
+
+    device_ids = {
+        device: [
+            {"start": int(start), "end": int(end)}
+            for start, end in total_waveform_intervals.interval_arr
+        ]
+    }
+
+    definition = DatasetDefinition(measures=measures, device_ids=device_ids)
+
+    itr = sdk.get_iterator(
+        definition,
+        window_duration=window_size,
+        window_slide=window_size,
+        gap_tolerance=gap_tol,
+        num_windows_prefetch=prefetch,
+        time_units="s",
+        shuffle=shuffle,
+    )
+
+    return itr
+
+
 def make_device_itr_all_signals(
     sdk,
     window_size,

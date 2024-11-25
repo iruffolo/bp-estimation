@@ -222,6 +222,17 @@ def calclulate_pat(ecg, ecg_freq, ppg, ppg_freq, pat_range=0.250):
     # Use median as expected value to correct outliers (i.e. mismatched beats)
     expected = np.median(pats["values"])
 
+    if expected < 0.5 or expected > 2:
+        print(pats)
+        print(naive_pats)
+
+        print(f"pats: {len(pats)}")
+        print(f"naive_pats: {len(naive_pats)}")
+        print(f"matching_peaks: {len(matching_peaks)}")
+        print(f"ecg_peak_times: {len(ecg_peak_times)}")
+        print(f"ppg_peak_times: {len(ppg_peak_times)}")
+        exit()
+
     num_corrected = 0
     tobedeleted = list()
 

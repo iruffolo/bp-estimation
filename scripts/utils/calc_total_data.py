@@ -1,3 +1,4 @@
+import numpy as np
 from atriumdb import AtriumSDK
 from atriumdb.intervals import Intervals
 from atriumdb.intervals.union import intervals_union_list
@@ -62,6 +63,9 @@ if __name__ == "__main__":
     device = 80
 
     t_duration = 0
+
+    p_id = []
+
     for d in devices:
         interval = get_intervals(
             sdk,
@@ -76,8 +80,18 @@ if __name__ == "__main__":
             duration_s = (i["end"] - i["start"]) / 10**9
 
             d_duration += duration_s
+            map = sdk.get_device_patient_data(
+                device_id_list=[d], start_time=i["start"], end_time=i["end"]
+            )
+            for m in map:
+                p_id.append(m[1])
+
         t_duration += d_duration
         print(f"Device {d} duration: {d_duration}")
+
+    print(len(p_id))
+    print(f"Total number of patients: {len(np.unique(p_id))}")
+
     print(f"Total duration: {t_duration}s")
     print(f"Total duration: {t_duration/60} min")
     print(f"Total duration: {t_duration/(60*60)} hours")

@@ -298,22 +298,12 @@ def make_device_itr_ecg_ppg(
 
     ecg_intervals = Intervals(
         sdk.get_interval_array(
-            ecg_id,
-            device_id=device,
-            patient_id=pid,
-            gap_tolerance_nano=gap_tol_nano,
-            start=start,
-            end=end,
+            ecg_id, device_id=device, gap_tolerance_nano=gap_tol_nano
         )
     )
     ppg_intervals = Intervals(
         sdk.get_interval_array(
-            ppg_id,
-            device_id=device,
-            patient_id=pid,
-            gap_tolerance_nano=gap_tol_nano,
-            start=start,
-            end=end,
+            ppg_id, device_id=device, gap_tolerance_nano=gap_tol_nano
         )
     )
 
@@ -335,7 +325,7 @@ def make_device_itr_ecg_ppg(
         gap_tolerance=gap_tol,
         num_windows_prefetch=prefetch,
         time_units="s",
-        shuffle=shuffle,
+        shuffle=False,
     )
 
     return itr

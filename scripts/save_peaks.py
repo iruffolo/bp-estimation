@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
 from pat import peak_detect, rpeak_detect_fast
-from utils.atriumdb_helpers import make_device_itr_all_signals, print_all_measures
+from utils.atriumdb_helpers import make_device_itr_all_signals, make_device_itr_ecg_ppg
 from utils.logger import Logger, WindowStatus
 
 
@@ -23,7 +23,7 @@ def save_peaks(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/peaks/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/peaks_ecg_ppg/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -42,8 +42,6 @@ def save_peaks(sdk, dev, itr, early_stop=None):
 
             # Extract specific signals
             match signal:
-                case signal if "SYS" in signal:
-                    sbp = v
                 case signal if "ECG_ELEC" in signal:
                     ecg, ecg_freq = v, freq
                 case signal if "PULS_OXIM" in signal:
@@ -78,13 +76,6 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                 },
                 f"{w.patient_id}_{date.month}_{date.year}_ppg_peaks",
             )
-            log.log_raw_data(
-                {
-                    "sbp_time": sbp["times"],
-                    "sbp_value": sbp["values"],
-                },
-                f"{w.patient_id}_{date.month}_{date.year}_sbp",
-            )
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -104,7 +95,7 @@ def save_peaks(sdk, dev, itr, early_stop=None):
         if early_stop and i >= early_stop:
             break
 
-    log.save()
+    # log.save()
 
     print(f"Finished processing device {dev}")
 
@@ -115,16 +106,12 @@ def run(local_dataset, window_size, gap_tol, device):
     """
     sdk = AtriumSDK(dataset_location=local_dataset)
 
-    itr = make_device_itr_all_signals(
+    itr = make_device_itr_ecg_ppg(
         sdk,
         window_size,
         gap_tol,
         device=device,
-        pid=None,
         prefetch=10,
-        shuffle=False,
-        start=None,
-        end=None,
     )
     save_peaks(sdk, device, itr)
 
@@ -140,19 +127,18 @@ if __name__ == "__main__":
     local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
-    print_all_measures(sdk)
 
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 2 * 60 * 60  # 30 min
+    window_size = 1 * 60 * 60  # 30 min
     gap_tol = 30 * 60  # 30 min to reduce overlapping windows with gap tol
 
-    # itr = make_device_itr_all_signals(sdk, window_size, gap_tol, 80, shuffle=False)
+    # itr = make_device_itr_ecg_ppg(sdk, window_size, gap_tol, device=80)
     # save_peaks(sdk, 80, itr, early_stop=50)
     # exit()
 
-    num_cores = 10  # len(devices)
+    num_cores = 15  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 

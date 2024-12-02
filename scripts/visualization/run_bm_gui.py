@@ -1,11 +1,12 @@
+import os
 import sys
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from atriumdb import AtriumSDK, DatasetDefinition
-from atrumdb_gui import ApplicationWindow
+from atriumdb import AtriumSDK
 from beat_matching import beat_matching, correct_pats, peak_detect, rpeak_detect_fast
+from bm_gui import ApplicationWindow
 from matplotlib.backends.qt_compat import QtWidgets
 from new_st import create_sawtooth, fit_sawtooth
 from utils.atriumdb_helpers import (
@@ -16,15 +17,14 @@ from utils.atriumdb_helpers import (
 
 
 class DataManager:
-    def __init__(self, sdk: AtriumSDK, app: ApplicationWindow, verbose=False):
-        self.sdk = sdk
+    def __init__(self, datapath, app: ApplicationWindow, verbose=False):
+        self.datapath = datapath
         self.app = app
 
         self.verbose = verbose
 
-        # Window and gap size for data pull
-        self.window_size_nano = 60 * 60 * (10**9)
-        self.gap_tol_nano = 10 * 60 * (10**9)
+        # Window size for initial data slice
+        self.window_size_sec = 60 * 60
 
         self.ssize = 6
 
@@ -35,9 +35,13 @@ class DataManager:
         self.points = 1000
         self.start_time = 0
 
-        # print_all_measures(sdk)
-        self.devices = list(sdk.get_all_devices().keys())
-        self.print(f"Available Devices: {self.devices}")
+        self.ecg_freq = 500
+        self.ppg_freq = 125
+
+        # Load file names from path, extract patient ids and device ids
+        self.process_files()
+
+        self.devices = self.p_df["dev"].unique()
 
         self.dev = self.devices[0]
 
@@ -52,34 +56,61 @@ class DataManager:
             self.update_cb,
         )
 
+    def process_files(self):
+        """
+        Process all files in the dataset
+        """
+
+        patients = {
+            "pid": [],
+            "dev": [],
+            "month": [],
+            "year": [],
+            "files": [],
+        }
+
+        for file in os.listdir(self.datapath):
+            if not file.endswith("log.csv"):
+                _, dev, pid, month, year, ftype = file.split("_")
+
+                patients["pid"].append(int(pid))
+                patients["dev"].append(int(dev))
+                patients["month"].append(int(month))
+                patients["year"].append(int(year))
+                patients["files"].append(file)
+
+        self.p_df = pd.DataFrame(patients)
+
+    def _update_years_list(self):
+        """
+        Get all available years for a given device
+        """
+
+        self.years = self.p_df["year"][self.p_df["dev"] == self.dev].unique()
+        self.year = self.years[0]
+
+        self.app.add_years(self.years, self.year_change_cb, self.year)
+
     def _update_patient_list(self):
         """
         Get the list of patients for a given device
         """
 
-        iarr = get_ppg_ecg_intervals_device(self.sdk, self.dev, self.gap_tol_nano)
-
-        # Filter patients that have valid overlapping self.ecg/self.ppg data
-        valid_patients = []
-        for i in iarr:
-            map = sdk.get_device_patient_data(
-                device_id_list=[self.dev], start_time=i[0], end_time=i[1]
-            )
-            self.print(f"Dev patient data: {map}")
-
-            if map:
-                for m in map:
-                    valid_patients.append(m[1])
-
-            if len(valid_patients) > 50:
-                break
-
-        self.patients = np.unique(valid_patients)
-        self.pid = self.patients[9]
+        self.patients = self.p_df["pid"][
+            (self.p_df["dev"] == self.dev) & (self.p_df["year"] == self.year)
+        ].unique()
+        self.pid = self.patients[0]
 
         self.app.add_patients(self.patients, self.patient_change_cb, self.pid)
 
         self.print(f"Available Patients: {self.patients}")
+
+    def year_change_cb(self, year):
+        self.print(f"Year changed {year}")
+        self.year = int(year)
+
+        self._update_patient_list()
+        self.patient_change_cb(self.pid)
 
     def patient_change_cb(self, patient_id):
         self.print(f"Patient changed {patient_id}")
@@ -92,6 +123,7 @@ class DataManager:
         self.dev = int(device_id)
 
         # Update patient list and select the first patient
+        self._update_years_list()
         self._update_patient_list()
         self.patient_change_cb(self.pid)
 
@@ -144,36 +176,41 @@ class DataManager:
         PATs.
         """
 
+        rows = self.p_df[
+            (self.p_df["pid"] == self.pid) & (self.p_df["dev"] == self.dev)
+        ]
+
+        self.year = rows["year"].values[0]
+        self.month = rows["month"].values[0]
+
         print("Getting raw data")
-        self.ppg, self.ecg, self.ppg_freq, self.ecg_freq = get_ppg_ecg_data(
-            self.sdk,
-            pid=self.pid,
-            dev=self.dev,
-            gap_tol=self.gap_tol_nano,
-            window=self.window_size_nano,
-        )
-        self.date = datetime.fromtimestamp(self.ecg["times"][0])
-        self.app.set_title(f"Patient {self.pid} Date: {self.date}")
+        ecg_file = rows["files"][self.p_df["files"].str.contains("ecg")].values[0]
+        ppg_file = rows["files"][self.p_df["files"].str.contains("ppg")].values[0]
+
+        self.print("Extracting Peaks")
+        self.ecg_beats = pd.read_csv(self.datapath + ecg_file).values.flatten()
+        self.ppg_beats = pd.read_csv(self.datapath + ppg_file).values.flatten()
+
+        self.app.set_title(f"Patient {self.pid} Date: {self.month}/{self.year}")
 
         # Remove offset from times
-        self.ppg["times"] = self.ppg["times"] - self.ppg["times"][0]
-        self.ecg["times"] = self.ecg["times"] - self.ecg["times"][0]
+        self.ppg_beats = self.ppg_beats - self.ppg_beats[0]
+        self.ecg_beats = self.ecg_beats - self.ecg_beats[0]
 
-        self.print("Calculating Peaks")
-        self.ecg_peak_times = rpeak_detect_fast(
-            self.ecg["times"], self.ecg["values"], self.ecg_freq
-        )
-        self.ppg_peak_times = peak_detect(
-            self.ppg["times"], self.ppg["values"], self.ppg_freq
-        )
+        idx = np.where((self.ecg_beats <= self.window_size_sec))[0]
+        assert len(idx) > 0, "No peaks in window"
+        self.ecg_peak_times = self.ecg_beats[idx]
 
-        self.print("Adding raw data to GUI")
-        self.app.plot_raw_data(
-            self.ppg, self.ecg, self.ppg_peak_times, self.ecg_peak_times
-        )
+        idx = np.where((self.ppg_beats <= self.window_size_sec))[0]
+        assert len(idx) > 0, "No peaks in window"
+        self.ppg_peak_times = self.ppg_beats[idx]
+
+        self.app.plot_raw_data(self.ppg_peak_times, self.ecg_peak_times)
 
         # Calculate beat matching and PATs
+        print("Starting BM")
         self.beat_matching()
+        print("BM Done")
 
         # Plot all the results
         self.app.plot_beat_match_data(self.all_pats)
@@ -183,6 +220,7 @@ class DataManager:
         self.start_time = 0
         self.update_window()
 
+        print("Fitting Sawtooths")
         self.sawtooth_one()
         self.sawtooth_two()
 
@@ -205,6 +243,8 @@ class DataManager:
 
         # Shift the pats to the left based on window size
         end_time = self.start_time + self.window_s
+
+        print(self.start_time, end_time)
         idx = np.where((x >= self.start_time) & (x <= end_time))[0]
         if not idx.size:
             print("Window out of range, do nothing")
@@ -289,11 +329,8 @@ if __name__ == "__main__":
     app = ApplicationWindow(sys.argv)
 
     # Mounted dataset
-    local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
-
-    sdk = AtriumSDK(dataset_location=local_dataset)
-
-    dm = DataManager(sdk, app, verbose=True)
+    dataset = "/home/ian/dev/bp-estimation/data/peaks/"
+    dm = DataManager(dataset, app, verbose=True)
 
     app.show()
     app.activateWindow()

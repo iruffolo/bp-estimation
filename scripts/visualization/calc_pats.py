@@ -1,3 +1,4 @@
+import concurrent.futures
 import os
 import sys
 from datetime import datetime
@@ -17,23 +18,30 @@ from utils.atriumdb_helpers import (
 
 
 class Pats:
-    def __init__(self, datapath, verbose=False):
+    def __init__(self, datapath, savepath, verbose=False):
         self.datapath = datapath
+        self.savepath = savepath
 
         self.verbose = verbose
 
         # Window size for initial data slice
+        self.nrows = 100000
+
         self.window_size_sec = 60 * 60
         self.ssize = 6
 
         self.ecg_freq = 500
         self.ppg_freq = 125
 
+        self.num_heartbeats = 0
+
         # Load file names from path, extract patient ids and device ids
         self.process_files()
-        self.print_stats()
-
         self.devices = self.p_df["dev"].unique()
+
+        self.process_devices()
+
+        self.print_stats()
 
     def print_stats(self):
         """
@@ -41,6 +49,7 @@ class Pats:
         """
         print(f"Total patients: {self.p_df['pid'].nunique()}")
         print(f"Total devices: {self.p_df['dev'].nunique()}")
+        print(f"Total beats: {self.num_heartbeats}")
 
     def process_files(self):
         """
@@ -56,173 +65,124 @@ class Pats:
         }
 
         for file in os.listdir(self.datapath):
-            if not file.endswith("log.csv"):
-                _, dev, pid, month, year, ftype = file.split("_")
-
-                patients["pid"].append(int(pid))
-                patients["dev"].append(int(dev))
-                patients["month"].append(int(month))
-                patients["year"].append(int(year))
-                patients["files"].append(file)
+            _, dev, pid, month, year, ftype = file.split("_")
+            patients["pid"].append(int(pid))
+            patients["dev"].append(int(dev))
+            patients["month"].append(int(month))
+            patients["year"].append(int(year))
+            patients["files"].append(file)
 
         self.p_df = pd.DataFrame(patients)
 
-    def update_patient_data(self):
+    def process_devices(self, cores=20):
         """
-        Get new patient data from database, calculate inital beat matching and
-        PATs.
+        Process all devices in the dataset
         """
 
-        rows = self.p_df[
-            (self.p_df["pid"] == self.pid) & (self.p_df["dev"] == self.dev)
-        ]
+        self.num_heartbeats = 0
+        # self.process_patients(self.devices[0])
 
-        self.year = rows["year"].values[0]
-        self.month = rows["month"].values[0]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+            results = [executor.submit(self.process_patients, d) for d in self.devices]
+
+            for f in concurrent.futures.as_completed(results):
+                print(f.result())
+                self.num_heartbeats += f.result()
+
+    def process_patients(self, d):
+        """
+        Process all patients in the dataset
+        """
+
+        print(f"Processing device {d}")
+
+        heartbeats = 0
+
+        for p in self.p_df["pid"][self.p_df["dev"] == d].unique():
+
+            files = self.p_df["files"][
+                (self.p_df["pid"] == p) & (self.p_df["dev"] == d)
+            ].values
+            print(files)
+
+            heartbeats += self.process_patient(p, d, files)
+
+        return heartbeats
+
+    def process_patient(self, patient, device, files):
+        print(f"Processing patient:\n{patient}")
 
         print("Getting raw data")
-        ecg_file = rows["files"][self.p_df["files"].str.contains("ecg")].values[0]
-        ppg_file = rows["files"][self.p_df["files"].str.contains("ppg")].values[0]
+        ecg_files = [f for f in files if "ecg" in f]
+        ppg_files = [f for f in files if "ppg" in f]
 
-        self.print("Extracting Peaks")
-        self.ecg_beats = pd.read_csv(self.datapath + ecg_file).values.flatten()
-        self.ppg_beats = pd.read_csv(self.datapath + ppg_file).values.flatten()
+        ecg_beats = []
+        ppg_beats = []
 
-        self.app.set_title(f"Patient {self.pid} Date: {self.month}/{self.year}")
+        for ecg_file, ppg_file in zip(ecg_files, ppg_files):
+            ecg = pd.read_csv(
+                self.datapath + ecg_file, nrows=self.nrows
+            ).values.flatten()
+            ppg = pd.read_csv(
+                self.datapath + ppg_file, nrows=self.nrows
+            ).values.flatten()
 
-        # Remove offset from times
-        self.ppg_beats = self.ppg_beats - self.ppg_beats[0]
-        self.ecg_beats = self.ecg_beats - self.ecg_beats[0]
+            ecg_beats.extend(ecg)
+            ppg_beats.extend(ppg)
 
-        idx = np.where((self.ecg_beats <= self.window_size_sec))[0]
-        assert len(idx) > 0, "No peaks in window"
-        self.ecg_peak_times = self.ecg_beats[idx]
+        print(f"Total ECG: {len(ecg_beats)} Total PPG: {len(ppg_beats)}")
+        num_heartbeats = len(ecg_beats)
 
-        idx = np.where((self.ppg_beats <= self.window_size_sec))[0]
-        assert len(idx) > 0, "No peaks in window"
-        self.ppg_peak_times = self.ppg_beats[idx]
+        ecg_beats = np.array(ecg_beats)
+        ppg_beats = np.array(ppg_beats)
 
-        self.app.plot_raw_data(self.ppg_peak_times, self.ecg_peak_times)
+        pats = self.beat_matching(ecg_beats, ppg_beats)
+        self.save_pats(patient, device, pats)
 
-        # Calculate beat matching and PATs
-        print("Starting BM")
-        self.beat_matching()
-        print("BM Done")
+        return num_heartbeats
 
-        # Plot all the results
-        self.app.plot_beat_match_data(self.all_pats)
-        self.app.plot_pat_data(self.pats, self.c_pats_df, self.cmap)
-
-        # Create smaller window slice for sawtooth fitting
-        self.start_time = 0
-        self.update_window()
-
-        print("Fitting Sawtooths")
-        self.sawtooth_one()
-        self.sawtooth_two()
-
-        self.update_sawtooth_plots()
-
-    def update_sawtooth_plots(self):
-        app.plot_sawtooth_one(self.x, self.y, self.x_ls, self.y_st1, self.fitp1)
-        app.plot_sawtooth_two(self.x, self.fixed_st1, self.x_ls, self.y_st2, self.fitp2)
-        app.plot_corrected(self.x, self.corrected_window)
-
-        self.app.update_button_text(self.fitp1, self.fitp2, self.window_s / 60)
-
-    def update_window(self):
+    def save_pats(self, patient, device, pats):
         """
-        Update the window size and start time for the data slice
+        Save the PATs to a CSV file
         """
+        print(f"Saving PATs for patient {patient} device {device}")
 
-        x = self.c_pats_df["times"].reset_index(drop=True)
-        y = self.c_pats_df["values"].reset_index(drop=True)
+        fn = os.path.join(self.savepath, f"{device}_{patient}.csv")
+        pats.to_csv(fn, header="column_names", index=False)
 
-        # Shift the pats to the left based on window size
-        end_time = self.start_time + self.window_s
-
-        print(self.start_time, end_time)
-        idx = np.where((x >= self.start_time) & (x <= end_time))[0]
-        if not idx.size:
-            print("Window out of range, do nothing")
-            return
-
-        self.x = x.iloc[idx]
-        self.y = y.iloc[idx]
-
-        # Create shifted and scaled x values for sawtooth fitting
-        self.x_shift = self.x.values - self.x.iloc[0]
-
-        self.x_ls = np.linspace(min(self.x_shift), max(self.x_shift), num=500)
-
-        # Shift x values back to original for plotting
-        self.x_st_plot = self.x_ls + self.x.iloc[0]
-
-    def beat_matching(self):
+    def beat_matching(self, ecg_beats, ppg_beats):
         """ """
 
-        self.matching_beats = beat_matching(
-            self.ecg_peak_times, self.ppg_peak_times, ssize=self.ssize
-        )
+        print("Beat Matching")
+        matching_beats = beat_matching(ecg_beats, ppg_beats, ssize=self.ssize)
 
-        # Create a df for plotting all possible beat matching PATs
-        self.all_pats = pd.DataFrame(
-            [m.possible_pats for m in self.matching_beats],
+        # Create a df for all possible PAT values
+        all_pats = pd.DataFrame(
+            [m.possible_pats for m in matching_beats],
             columns=[f"{i + 1} beats" for i in range(self.ssize)],
         )
-        self.all_pats["times"] = [
-            self.ecg_peak_times[m.ecg_peak] for m in self.matching_beats
-        ]
-        self.all_pats.set_index("times", inplace=True)
 
-        # Select the best match in the beatmatching for actual PAT values
-        self.pats = {
-            "times": [self.ecg_peak_times[m.ecg_peak] for m in self.matching_beats],
-            "values": [m.possible_pats[m.n_peaks] for m in self.matching_beats],
-            "confidence": [m.confidence for m in self.matching_beats],
-        }
+        all_pats["bm_pat"] = [m.possible_pats[m.n_peaks] for m in matching_beats]
+        all_pats["confidence"] = [m.confidence for m in matching_beats]
+        all_pats["times"] = [ecg_beats[m.ecg_peak] for m in matching_beats]
+        all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
+        # self.all_pats.set_index("times", inplace=True)
 
         # Correct the PATs
-        self.c_pats_df, _ = correct_pats(
-            self.pats, self.matching_beats, pat_range=0.100
-        )
+        print("Correcting PATs")
+        correct_pats(all_pats, matching_beats, pat_range=0.300)
+        print(all_pats.head())
 
-        cmap = [m.confidence for m in self.matching_beats]
-        self.cmap = (np.array(cmap) - np.min(cmap)) / (np.max(cmap) - np.min(cmap))
+        # cmap = [m.confidence for m in matching_beats]
+        # cmap = (np.array(cmap) - np.min(cmap)) / (np.max(cmap) - np.min(cmap))
 
-    def sawtooth_one(self, fit=True):
-
-        if fit:
-            self.st1, self.fitp1 = fit_sawtooth(self.x_shift, self.y)
-        else:
-            self.st1 = create_sawtooth(self.x_shift, *self.fitp1)
-
-        self.fixed_st1 = (self.y - self.st1) + self.fitp1[2]
-
-        # Sawtooth y values for plotting
-        self.y_st1 = create_sawtooth(self.x_st_plot, *self.fitp1)
-
-    def sawtooth_two(self, fit=True):
-        if fit:
-            self.st2, self.fitp2 = fit_sawtooth(
-                self.x_shift, self.fixed_st1, period=200, amp=15
-            )
-        else:
-            self.st2 = create_sawtooth(self.x_shift, *self.fitp2)
-
-        self.corrected_window = (self.fixed_st1 - self.st2) + self.fitp2[2]
-
-        # Sawtooth y values for plotting
-        self.y_st2 = create_sawtooth(self.x_st_plot, *self.fitp2)
-
-    def print(self, *args, **kwargs):
-        if self.verbose:
-            print(*args, **kwargs)
+        return all_pats
 
 
 if __name__ == "__main__":
 
     # Mounted dataset
     print("Loaded data")
-    dataset = "/home/ian/dev/bp-estimation/data/peaks/"
-    pats = Pats(dataset, verbose=True)
+    dataset = "/home/ian/dev/bp-estimation/data/peaks_ecg_ppg/"
+    savepath = "/home/ian/dev/bp-estimation/data/pats/"
+    pats = Pats(dataset, savepath, verbose=True)

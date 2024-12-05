@@ -101,7 +101,7 @@ class MatchedPeak:
     possible_pats: list[float] = field(default_factory=list)
 
 
-def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_time=1):
+def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_time=5):
     """
     Align peaks from ECG and PPG signals
 
@@ -174,36 +174,37 @@ def correct_pats(pats_df, matching_beats, pat_range=0.100):
     :return: corrected PATs
     """
 
-    pats_df = pd.DataFrame(pats_df)
-
-    expected = np.median(pats_df["values"][pats_df["confidence"] > 0.7])
+    expected = np.median(pats_df["bm_pat"][pats_df["confidence"] > 0.7])
     print(f"Expected PAT: {expected}")
 
-    num_corrected = 0
-    tobedeleted = list()
+    pats_df["corrected_bm_pat"] = pats_df["bm_pat"]
+    pats_df["valid_correction"] = np.ones(pats_df.shape[0]) * 2
 
-    for i, pat in enumerate(pats_df["values"]):
+    print(f"range: {expected - pat_range} - {expected + pat_range}")
 
-        # PAT outside expected range, correct it
-        if not (expected - pat_range < pat < expected + pat_range):
+    for row in pats_df[
+        (pats_df["corrected_bm_pat"] < (expected - pat_range))
+        | (pats_df["corrected_bm_pat"] > (expected + pat_range))
+    ].iterrows():
 
-            m = matching_beats[i]
+        i = row[0]
 
-            best = 0
-            for new_pat in m.possible_pats:
+        m = matching_beats[i]
 
-                # Best PAT is selected as closest to expected value over search
-                if abs(new_pat - expected) < abs(best - expected):
-                    best = new_pat
+        best = 0
+        beats = 0
+        for j, new_pat in enumerate(m.possible_pats):
 
-            if expected - pat_range < best < expected + pat_range:
-                pats_df.loc[i, "values"] = best
-                num_corrected += 1
+            # Best PAT is selected as closest to expected value over search
+            if abs(new_pat - expected) < abs(best - expected):
+                best = new_pat
+                beats = j
 
-            # Couldn't find a good enough correction, remove point
-            else:
-                tobedeleted.append(i)
+        if expected - pat_range < best < expected + pat_range:
+            pats_df.loc[i, "corrected_bm_pat"] = best
+            pats_df.loc[i, "valid_correction"] = 1
+            pats_df.loc[i, "beats_skipped"] = beats
 
-    pats_df.drop(tobedeleted, inplace=True)
-
-    return pats_df, num_corrected
+        # Couldn't find a good enough correction, remove point
+        else:
+            pats_df.loc[i, "valid_correction"] = 0

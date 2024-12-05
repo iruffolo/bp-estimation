@@ -25,7 +25,7 @@ class Pats:
         self.verbose = verbose
 
         # Window size for initial data slice
-        self.nrows = 100000
+        self.nrows = None
 
         self.window_size_sec = 60 * 60
         self.ssize = 6
@@ -82,7 +82,7 @@ class Pats:
         self.num_heartbeats = 0
         # self.process_patients(self.devices[0])
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=cores) as executor:
             results = [executor.submit(self.process_patients, d) for d in self.devices]
 
             for f in concurrent.futures.as_completed(results):
@@ -184,5 +184,5 @@ if __name__ == "__main__":
     # Mounted dataset
     print("Loaded data")
     dataset = "/home/ian/dev/bp-estimation/data/peaks_ecg_ppg/"
-    savepath = "/home/ian/dev/bp-estimation/data/pats/"
+    savepath = "/home/ian/dev/bp-estimation/data/pats_all/"
     pats = Pats(dataset, savepath, verbose=True)

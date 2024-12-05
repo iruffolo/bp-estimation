@@ -69,6 +69,15 @@ def plot_by_date(sdk, path, files, shape=4999):
 
     total_pats = {}
 
+    ages = np.linspace(0, 15, 16).astype(int)
+
+    bins = 500
+    bin_range = (1, 2)
+
+    h, edges = np.histogram([], bins=bins, range=bin_range)
+    # bincenters = [(edges[i] + edges[i + 1]) / 2.0 for i in range(len(edges) - 1)]
+    hists = {age: np.histogram([], bins=bins, range=bin_range)[0] for age in ages}
+
     for f in files:
         dev, pid = f.strip(".csv").split("_")
 
@@ -78,54 +87,52 @@ def plot_by_date(sdk, path, files, shape=4999):
         # print(eastern_tz.localize(dob))
 
         data = pd.read_csv(f"{path}/{f}")
-        print(data.head())
+        if data.empty:
+            continue
+
+        date = datetime.fromtimestamp(data["times"].iloc[0])
+        if date.year >= 2022:
+            print(f"Skipping {date}")
+            continue
+        else:
+            print(f"Processing {date}")
 
         data["age_days"] = data["times"].apply(lambda x: get_age_at_visit(x, dob))
-        data["age_years"] = data["age_days"] / 365.2425
-
-        year = pd.to_datetime(data["times"], unit="s").dt.year
+        data["age_years"] = (data["age_days"] / 365.2425).astype(int)
         print(data.head())
 
-    return
+        bin = min(np.floor(np.average(data["age_years"])), 15)
+        print(f"Bin: {bin}")
 
-    for k, v in data.items():
-        print(k, v)
-
-        year = pd.to_datetime(v["visit_time"], unit="s").year
-        month = pd.to_datetime(v["visit_time"], unit="s").month
-        print(year, month)
-
-        if year not in total_pats:
-            total_pats[year] = {}
-        if month not in total_pats[year]:
-            total_pats[year][month] = np.zeros(shape)
-
-        total_pats[year][month] += v["pat"]
-        # print(np.sum(total_pats))
-
-    slice_l = 500
-    slice_u = 3500
-    bins = np.linspace(0, 4, 5000)[slice_l : slice_u + 1]
-
-    fig, ax = plt.subplots(12, figsize=(10, 10))
-
-    for m in total_pats[2022].keys():
-        ax[m - 1].stairs(
-            total_pats[2022][m][slice_l:slice_u],
-            bins,
-            fill=True,
-            alpha=0.8,
-            label=f"{m}",
+        h, _ = np.histogram(
+            data["corrected_bm_pat"][data["valid_correction"] > 0],
+            bins=bins,
+            range=bin_range,
         )
-        ax[m - 1].legend()
-    # for year in total_pats.keys():
-    #     ax.stairs(total_pats[year][slice_l:slice_u], bins, fill=True, alpha=0.8,
-    #               label=f"{year}")
 
-    plt.legend()
-    plt.suptitle(f"PAT Distributions by Year")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Frequency")
+        hists[bin] += h
+
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+
+    for age, hist in hists.items():
+        # ax.step(bincenters, hist, where="mid", label=f"{age} years")
+        # if age in [3, 6, 9, 12]:
+
+        cumsum = np.cumsum(hist)
+        cumsum = cumsum / cumsum[-1]
+
+        ax.plot(edges[:-1], cumsum, label=f"{age} years")
+
+        # hist = hist / np.sum(hist)
+        # ax.stairs(hist, edges, label=f"{age} years", alpha=0.8)
+
+    ax.minorticks_on()
+    ax.yaxis.set_tick_params(which="minor", bottom=False)
+    ax.set_title(f"PAT cdf")
+    ax.set_xlabel("PAT (s)")
+    ax.set_ylabel("Probability")
+    ax.grid(color="0.9")
+    ax.legend(loc="upper right")
 
     plt.show()
 
@@ -233,7 +240,7 @@ if __name__ == "__main__":
 
     path = "/home/ian/dev/bp-estimation/data/pats"
     files = os.listdir(path)
-    print(f"Files: {files}")
+    # print(f"Files: {files}")
 
     # Mounted dataset
     local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"

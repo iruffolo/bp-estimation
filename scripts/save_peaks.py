@@ -23,13 +23,25 @@ def save_peaks(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/peaks_ecg_ppg/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/andrew_peaks/", verbose=True)
+
+    count = 0
 
     for i, w in enumerate(itr):
 
         if not w.patient_id:
             log.log_status(WindowStatus.NO_PATIENT_ID)
             continue
+        else:
+            # Check patient age
+            info = sdk.get_patient_info(w.patient_id)
+            t = datetime.fromtimestamp(w.start_time / 10**9).year
+            dob = datetime.fromtimestamp(info["dob"] / 10**9).year
+            age_at_visit = t - dob
+
+            if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
+                print(f"Skipping patient, date: {t}, age: {age_at_visit}")
+                continue
 
         # Extract data from window and validate
         for (signal, freq, _), v in w.signals.items():
@@ -48,6 +60,8 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                     ppg, ppg_freq = v, freq
                 case _:
                     pass
+
+        return
 
         # Ensure window data is valid (gap tol can create bad windows)
         # if v["expected_count"] * 0.5 > v["actual_count"]:
@@ -68,13 +82,13 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                 {
                     "ecg_peaks": ecg_peak_times,
                 },
-                f"{w.patient_id}_{date.month}_{date.year}_ecg_peaks",
+                f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ecg",
             )
             log.log_raw_data(
                 {
                     "ppg_peaks": ppg_peak_times,
                 },
-                f"{w.patient_id}_{date.month}_{date.year}_ppg_peaks",
+                f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ppg",
             )
             log.log_status(WindowStatus.SUCCESS)
 
@@ -92,7 +106,9 @@ def save_peaks(sdk, dev, itr, early_stop=None):
             print(f"Unexpected failure {e}")
             log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
-        if early_stop and i >= early_stop:
+        count += 1
+
+        if early_stop and count >= early_stop:
             break
 
     # log.save()
@@ -113,7 +129,7 @@ def run(local_dataset, window_size, gap_tol, device):
         device=device,
         prefetch=10,
     )
-    save_peaks(sdk, device, itr)
+    save_peaks(sdk, device, itr, early_stop=10)
 
     return True
 

@@ -7,12 +7,17 @@ import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
 
-from pat import peak_detect, rpeak_detect_fast
 from utils.atriumdb_helpers import make_device_itr_all_signals, make_device_itr_ecg_ppg
 from utils.logger import Logger, WindowStatus
+from visualization.beat_matching import (
+    beat_matching,
+    correct_pats,
+    peak_detect,
+    rpeak_detect_fast,
+)
 
 
-def save_peaks(sdk, dev, itr, early_stop=None):
+def save_pats(sdk, dev, itr, early_stop=None):
     """
     Processing function for dataset iterator
 
@@ -24,9 +29,7 @@ def save_peaks(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/andrew_peaks/", verbose=True)
-
-    count = 0
+    log = Logger(dev, num_windows, path="../data/beat_matching/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -39,11 +42,9 @@ def save_peaks(sdk, dev, itr, early_stop=None):
             t = datetime.fromtimestamp(w.start_time / 10**9).year
             dob = datetime.fromtimestamp(info["dob"] / 10**9).year
             age_at_visit = t - dob
-
-            if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
-                print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
-                continue
-
+            # if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
+        #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
+        #         continue
         print(f"Processing patient dev {dev}, date: {t}, age: {age_at_visit}")
 
         # Extract data from window and validate
@@ -65,9 +66,9 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                     pass
 
         # Ensure window data is valid (gap tol can create bad windows)
-        # if v["expected_count"] * 0.5 > v["actual_count"]:
-        #     log.log_status(WindowStatus.INCOMPLETE_WINDOW)
-        #     continue
+        if v["expected_count"] * 0.2 > v["actual_count"]:
+            log.log_status(WindowStatus.INCOMPLETE_WINDOW)
+            continue
 
         try:
             with warnings.catch_warnings():
@@ -78,6 +79,23 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                 ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
             date = datetime.fromtimestamp(ecg["times"][0])
+
+            ssize = 6
+            matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
+            print(f"Matched beats: {len(matching_beats)}")
+
+            # Create a df for all possible PAT values
+            all_pats = pd.DataFrame(
+                [m.possible_pats for m in matching_beats],
+                columns=[f"{i + 1} beats" for i in range(ssize)],
+            )
+
+            all_pats["bm_pat"] = [m.possible_pats[m.n_peaks] for m in matching_beats]
+            all_pats["confidence"] = [m.confidence for m in matching_beats]
+            all_pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
+            all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
+
+            correct_pats(all_pats, matching_beats, pat_range=0.300)
 
             log.log_raw_data(
                 {
@@ -91,6 +109,10 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                 },
                 f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ppg",
             )
+            log.log_raw_data(
+                all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pats"
+            )
+
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -104,12 +126,10 @@ def save_peaks(sdk, dev, itr, early_stop=None):
                 log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
         except Exception as e:
-            print(f"Unexpected failure {e}")
+            print(f"Unexpected failure: {e}")
             log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
-        count += 1
-
-        if early_stop and count >= early_stop:
+        if early_stop and i >= early_stop:
             break
 
     # log.save()
@@ -128,10 +148,10 @@ def run(local_dataset, window_size, gap_tol, device):
         window_size,
         gap_tol,
         device=device,
-        prefetch=20,
+        prefetch=10,
         shuffle=True,
     )
-    save_peaks(sdk, device, itr)
+    save_pats(sdk, device, itr)
 
     return True
 
@@ -149,11 +169,11 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 1 * 30 * 60  # 30 min
-    gap_tol = 30 * 60  # 30 min to reduce overlapping windows with gap tol
+    window_size = 5 * 60 * 60  # 60 min
+    gap_tol = 60 * 60  # 30 min to reduce overlapping windows with gap tol
 
     # itr = make_device_itr_ecg_ppg(sdk, window_size, gap_tol, device=80)
-    # save_peaks(sdk, 80, itr, early_stop=50)
+    # save_pats(sdk, 80, itr, early_stop=50)
     # exit()
 
     num_cores = 15  # len(devices)

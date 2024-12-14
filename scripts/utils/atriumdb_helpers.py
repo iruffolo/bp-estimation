@@ -265,6 +265,7 @@ def make_device_itr_ecg_ppg(
     gap_tol,
     device=None,
     prefetch=10,
+    shuffle=False,
 ):
     """
     Creates new SDK instance and iterator for a specific device
@@ -325,7 +326,7 @@ def make_device_itr_ecg_ppg(
         gap_tolerance=gap_tol,
         num_windows_prefetch=prefetch,
         time_units="s",
-        shuffle=False,
+        shuffle=shuffle,
     )
 
     return itr

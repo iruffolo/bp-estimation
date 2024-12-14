@@ -3,6 +3,7 @@ import os
 import sys
 from datetime import datetime
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK
@@ -25,7 +26,7 @@ class Pats:
         self.verbose = verbose
 
         # Window size for initial data slice
-        self.nrows = None
+        self.nrows = 10000
 
         self.window_size_sec = 60 * 60
         self.ssize = 6
@@ -74,13 +75,15 @@ class Pats:
 
         self.p_df = pd.DataFrame(patients)
 
-    def process_devices(self, cores=20):
+    def process_devices(self, cores=1):
         """
         Process all devices in the dataset
         """
 
         self.num_heartbeats = 0
-        # self.process_patients(self.devices[0])
+        self.process_patients(self.devices[0])
+
+        return
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=cores) as executor:
             results = [executor.submit(self.process_patients, d) for d in self.devices]
@@ -137,7 +140,9 @@ class Pats:
         ppg_beats = np.array(ppg_beats)
 
         pats = self.beat_matching(ecg_beats, ppg_beats)
-        self.save_pats(patient, device, pats)
+        # self.save_pats(patient, device, pats)
+
+        self.sawtooth_one(pats)
 
         return num_heartbeats
 
@@ -178,11 +183,45 @@ class Pats:
 
         return all_pats
 
+    def sawtooth_one(self, pats):
+
+        print("Fitting sawtooth")
+
+        pats = pats[pats["valid_correction"] > 0]
+
+        # Shift to zero for easy plotting
+        x = pats["times"].values - pats["times"].iloc[0]
+        y = pats["corrected_bm_pat"]
+
+        st, fitp = fit_sawtooth(x, y, amp=50)
+        print(
+            f"Fit: amplitude {fitp[0]}, period {fitp[1]}, offset {fitp[2]}, phase {fitp[3]}"
+        )
+
+        fixed_st = (y - st) + fitp[2]
+
+        from test import piecewise
+
+        # Sawtooth y values for plotting
+        x_ls = np.linspace(min(x), max(x), num=500)
+        y_st = create_sawtooth(x_ls, *fitp)
+        poly = np.polyfit(x, y, deg=5)
+
+        fig, ax = plt.subplots()
+
+        xdist = piecewise(y=y, n=6, init="2dist")
+        ax.plot(xdist, y[xdist], label="approx (dist)")
+        ax.scatter(x, y, marker="x")
+        ax.scatter(x, fixed_st, alpha=0.5, marker=".")
+        ax.plot(x_ls, y_st, alpha=0.8, color="red")
+
+        plt.show()
+
 
 if __name__ == "__main__":
 
     # Mounted dataset
     print("Loaded data")
     dataset = "/home/ian/dev/bp-estimation/data/peaks_ecg_ppg/"
-    savepath = "/home/ian/dev/bp-estimation/data/pats_all/"
+    savepath = "/home/ian/dev/bp-estimation/data/sawtooth/"
     pats = Pats(dataset, savepath, verbose=True)

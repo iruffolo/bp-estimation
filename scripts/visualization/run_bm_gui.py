@@ -9,6 +9,7 @@ from beat_matching import beat_matching, correct_pats, peak_detect, rpeak_detect
 from bm_gui import ApplicationWindow
 from matplotlib.backends.qt_compat import QtWidgets
 from new_st import create_sawtooth, fit_sawtooth
+from pyhrv.nonlinear import poincare
 from utils.atriumdb_helpers import (
     get_ppg_ecg_data,
     get_ppg_ecg_intervals_device,
@@ -24,14 +25,15 @@ class DataManager:
         self.verbose = verbose
 
         # Window size for initial data slice
-        self.window_size_sec = 60 * 60
+        self.nrows = 100000
+        self.window_size_sec = 60 * 60 * 10
 
         self.ssize = 6
 
         ## Params for stepping through dynamic plots
         self.index = 0
-        self.step = 20 * 60  # 10 minutes
-        self.window_s = 20 * 60  # 30 minutes
+        self.step = 30 * 60  # 10 minutes
+        self.window_s = 5 * 60  # 30 minutes
         self.points = 1000
         self.start_time = 0
 
@@ -188,8 +190,12 @@ class DataManager:
         ppg_file = rows["files"][self.p_df["files"].str.contains("ppg")].values[0]
 
         self.print("Extracting Peaks")
-        self.ecg_beats = pd.read_csv(self.datapath + ecg_file).values.flatten()
-        self.ppg_beats = pd.read_csv(self.datapath + ppg_file).values.flatten()
+        self.ecg_beats = pd.read_csv(
+            self.datapath + ecg_file, nrows=self.nrows
+        ).values.flatten()
+        self.ppg_beats = pd.read_csv(
+            self.datapath + ppg_file, nrows=self.nrows
+        ).values.flatten()
 
         self.app.set_title(f"Patient {self.pid} Date: {self.month}/{self.year}")
 
@@ -204,6 +210,22 @@ class DataManager:
         idx = np.where((self.ppg_beats <= self.window_size_sec))[0]
         assert len(idx) > 0, "No peaks in window"
         self.ppg_peak_times = self.ppg_beats[idx]
+
+        _, ecg_sd1, ecg_sd2, ecg_sd_ratio, _ = poincare(
+            rpeaks=self.ecg_peak_times, show=False
+        )
+        _, ppg_sd1, ppg_sd2, ppg_sd_ratio, _ = poincare(
+            rpeaks=self.ppg_peak_times, show=False
+        )
+
+        if ecg_sd1 < 5 or ecg_sd2 < 5:
+            print("Low ECG SD1, skipping")
+
+        if ppg_sd1 < 5 or ppg_sd2 < 5:
+            print("Low PPG SD1, skipping")
+
+        print(ecg_sd1, ecg_sd2, ecg_sd_ratio)
+        print(ppg_sd1, ppg_sd2, ppg_sd_ratio)
 
         self.app.plot_raw_data(self.ppg_peak_times, self.ecg_peak_times)
 
@@ -239,7 +261,7 @@ class DataManager:
         """
 
         x = self.c_pats_df["times"].reset_index(drop=True)
-        y = self.c_pats_df["values"].reset_index(drop=True)
+        y = self.c_pats_df["corrected_bm_pat"].reset_index(drop=True)
 
         # Shift the pats to the left based on window size
         end_time = self.start_time + self.window_s
@@ -281,14 +303,14 @@ class DataManager:
         # Select the best match in the beatmatching for actual PAT values
         self.pats = {
             "times": [self.ecg_peak_times[m.ecg_peak] for m in self.matching_beats],
-            "values": [m.possible_pats[m.n_peaks] for m in self.matching_beats],
+            "bm_pat": [m.possible_pats[m.n_peaks] for m in self.matching_beats],
             "confidence": [m.confidence for m in self.matching_beats],
         }
 
+        self.c_pats_df = pd.DataFrame(self.pats)
+
         # Correct the PATs
-        self.c_pats_df, _ = correct_pats(
-            self.pats, self.matching_beats, pat_range=0.100
-        )
+        correct_pats(self.c_pats_df, self.matching_beats, pat_range=0.100)
 
         cmap = [m.confidence for m in self.matching_beats]
         self.cmap = (np.array(cmap) - np.min(cmap)) / (np.max(cmap) - np.min(cmap))

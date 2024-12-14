@@ -36,8 +36,8 @@ def fit_sawtooth(x, y, period=60, amp=20):
 
     offset = np.median(y)
 
-    lower = [10, period - 20, offset - 0.02, 0]
-    upper = [30, period + 20, offset + 0.02, 2 * np.pi]
+    lower = [0, period - 20, offset - 0.02, 0]
+    upper = [100, period + 20, offset + 0.02, 2 * np.pi]
 
     bounds = (lower, upper)
 

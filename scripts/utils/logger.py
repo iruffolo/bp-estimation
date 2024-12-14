@@ -15,6 +15,7 @@ class WindowStatus(Enum):
     POOR_ECG_QUALITY = 5
     POOR_PPG_QUALITY = 6
     INSUFFICIENT_PATS = 7
+    BM_FAILED = 8
 
 
 class Logger:
@@ -56,6 +57,7 @@ class Logger:
             WindowStatus.POOR_ECG_QUALITY.name: 0,
             WindowStatus.POOR_PPG_QUALITY.name: 0,
             WindowStatus.INSUFFICIENT_PATS.name: 0,
+            WindowStatus.BM_FAILED.name: 0,
         }
 
         # Every X windows, log results then reset
@@ -155,7 +157,7 @@ class Logger:
         for status in self.window_stats:
             print(f"{status}: {self.window_stats[status]}")
 
-    def save(self):
+    def save_log(self):
         """
         Save the log to a CSV file
         """
@@ -173,9 +175,6 @@ class Logger:
         )
 
         df.to_csv(os.path.join(self.path, f"device_{self.dev}_log.csv"), index=False)
-
-        # Dump any remaining data
-        self._save_current_res()
 
 
 if __name__ == "__main__":

@@ -66,7 +66,8 @@ def save_pats(sdk, dev, itr, early_stop=None):
                     pass
 
         # Ensure window data is valid (gap tol can create bad windows)
-        if v["expected_count"] * 0.2 > v["actual_count"]:
+        if v["expected_count"] * 0.05 > v["actual_count"]:
+            print(f"Incomplete window {v['actual_count']}")
             log.log_status(WindowStatus.INCOMPLETE_WINDOW)
             continue
 
@@ -80,9 +81,13 @@ def save_pats(sdk, dev, itr, early_stop=None):
 
             date = datetime.fromtimestamp(ecg["times"][0])
 
+            assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
+            assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
+
             ssize = 6
             matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
-            print(f"Matched beats: {len(matching_beats)}")
+            # print(f"Matched beats: {len(matching_beats)}")
+            assert len(matching_beats) > 0, "BM failed to find any matching beats"
 
             # Create a df for all possible PAT values
             all_pats = pd.DataFrame(
@@ -96,6 +101,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
             all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
 
             correct_pats(all_pats, matching_beats, pat_range=0.300)
+            # print(all_pats.head())
 
             log.log_raw_data(
                 {
@@ -110,7 +116,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
                 f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ppg",
             )
             log.log_raw_data(
-                all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pats"
+                all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pat"
             )
 
             log.log_status(WindowStatus.SUCCESS)
@@ -120,9 +126,12 @@ def save_pats(sdk, dev, itr, early_stop=None):
             print(f"Signal quality issue: {e}")
             if "ECG" in str(e):
                 log.log_status(WindowStatus.POOR_ECG_QUALITY)
-            if "PPG" in str(e):
+            elif "PPG" in str(e):
                 log.log_status(WindowStatus.POOR_PPG_QUALITY)
+            elif "BM" in str(e):
+                log.log_status(WindowStatus.BM_FAILED)
             else:
+                print(f"Unexpected assert failure: {e}")
                 log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
         except Exception as e:
@@ -132,7 +141,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
         if early_stop and i >= early_stop:
             break
 
-    # log.save()
+    log.save_log()
 
     print(f"Finished processing device {dev}")
 
@@ -173,10 +182,10 @@ if __name__ == "__main__":
     gap_tol = 60 * 60  # 30 min to reduce overlapping windows with gap tol
 
     # itr = make_device_itr_ecg_ppg(sdk, window_size, gap_tol, device=80)
-    # save_pats(sdk, 80, itr, early_stop=50)
+    # save_pats(sdk, 85, itr, early_stop=50)
     # exit()
 
-    num_cores = 15  # len(devices)
+    num_cores = 20  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 

@@ -9,9 +9,10 @@ import pandas as pd
 from atriumdb import AtriumSDK
 from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
-from plotting.pat import plot_pat, plot_pat_hist
 from scipy.linalg import norm
 from scipy.spatial import distance
+
+from plotting.pat import plot_pat, plot_pat_hist
 
 
 def peak_detect(signal_times, signal_values, freq_hz):
@@ -101,7 +102,7 @@ class MatchedPeak:
     possible_pats: list[float] = field(default_factory=list)
 
 
-def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_time=5):
+def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_time=2):
     """
     Align peaks from ECG and PPG signals
 
@@ -114,7 +115,8 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
     """
 
     # Precalculate quality index for entire PPG signal
-    ppg_quality = get_quality_index(ppg_peak_times)
+    # ecg_quality = get_quality_index(ecg_peak_times)
+    # ppg_quality = get_quality_index(ppg_peak_times)
 
     matching_beats = list()
 
@@ -131,9 +133,10 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
             continue
 
         # Signal quality passed and within idx bounds for search
-        if ((idx + wsize + ssize) < ppg_peak_times.size) and (
-            ppg_quality[idx : idx + wsize + ssize].all()
-        ):
+        if (idx + wsize + ssize) < ppg_peak_times.size:
+            # and
+            #     # ppg_quality[idx : idx + wsize + ssize].all()
+            # ):
 
             # Calculate distance for each PPG peak in search window
             euclidean = np.array(

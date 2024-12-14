@@ -371,11 +371,11 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._pat_series_ax.clear()
 
         self._pat_series_ax.scatter(
-            pats["times"], pats["values"], s=3, c=cmap, cmap="Reds", alpha=0.9
+            pats["times"], pats["bm_pat"], s=3, c=cmap, cmap="Reds", alpha=0.9
         )
 
         self._pat_series_ax.scatter(
-            c_pats["times"], c_pats["values"], s=0.3, c="blue", alpha=0.3
+            c_pats["times"], c_pats["corrected_bm_pat"], s=0.3, c="blue", alpha=0.3
         )
 
         # median = np.median(pats["values"])
@@ -401,6 +401,8 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self._sawtooth_ax1.set_ylabel("PAT (s)")
         self._sawtooth_ax1.set_title(f"First sawtooth fit")
         self._sawtooth_ax1.grid(True)
+
+        self._a1_p1 = self._sawtooth_ax1.plot(np.polyval(poly, x))
 
         self._a1_p1 = self._sawtooth_ax1.plot(x, y, ".")
         self._a1_p2 = self._sawtooth_ax1.plot(st_x, st_y, "--", color="red")[0]

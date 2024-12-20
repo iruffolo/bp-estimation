@@ -3,6 +3,44 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import signal
 from scipy.optimize import curve_fit, differential_evolution
+from sklearn.metrics import r2_score
+
+
+def fit_sawtooth_phase(x, y, period, amp):
+
+    offset = np.median(y)
+
+    def create_sawtooth_phase(x, period, offset, phase):
+        x_scaled = x / x[-1]
+        freq_scaled = (np.max(x) - np.min(x)) / period
+        st = (
+            amp * signal.sawtooth((2 * np.pi * freq_scaled) * x_scaled - phase) + offset
+        )
+        # st = amp * signal.sawtooth((2 * np.pi / period) * x_scaled - phase) + offset
+        return st
+
+    lower = [period - 10, offset - 0.05, 0]
+    upper = [period + 10, offset + 0.05, 2 * np.pi]
+    bounds = (lower, upper)
+    io = [period, offset, 0]
+
+    fitP, pcov = curve_fit(create_sawtooth_phase, x, y, bounds=bounds)
+
+    model = create_sawtooth_phase(x, *fitP)
+
+    err = model - y
+
+    SE = np.square(err)  # squared errors
+    MSE = np.mean(SE)  # mean squared errors
+    RMSE = np.sqrt(MSE)  # Root Mean Squared Error, RMSE
+    Rsquared = 1.0 - (np.var(err) / np.var(y))
+
+    print(MSE, RMSE, Rsquared)
+
+    r2 = r2_score(y, model)
+    print(r2)
+
+    return model, fitP
 
 
 def create_sawtooth(x, A, period, offset, phase):

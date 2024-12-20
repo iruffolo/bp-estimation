@@ -4,6 +4,8 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from filterpy.common import Q_discrete_white_noise
+from filterpy.kalman import KalmanFilter
 from pyhrv.nonlinear import poincare
 from visualization.new_st import create_sawtooth, fit_sawtooth_phase
 
@@ -60,6 +62,69 @@ def calc_hist_stats(h, bins):
     return avg, std
 
 
+def reset_kf(f, i0):
+
+    f.x = np.array([i0])
+    f.P *= 1000.0
+    f.R = np.array([[0.01]])  # Measurement noise
+    f.Q = np.array([0.000001])  # Process noise
+
+    f.H = np.array([1.0])
+    f.B = np.array([1.0])
+
+
+def kf(x, y):
+
+    # Expected s.t. slope = amp / period
+    slope = 0.05 / 60
+
+    f = KalmanFilter(dim_x=1, dim_z=1, dim_u=1)
+    reset_kf(f, y[0])
+
+    ys = []
+    preds = [f.x]
+    times = [x[0]]
+    meas = [y[0]]
+
+    kfs = {}
+    current_kf = 0
+
+    resids = []
+
+    diffs = np.diff(x)
+    for t, dx, m in zip(x[1:], diffs, y[1:]):
+
+        u = dx * slope
+        f.predict(u=u)
+        f.update(m)
+
+        resids.append(f.y)
+
+        if abs(f.y) > 0.035:
+            reset_kf(f, m)
+            f.predict(u=u)
+            f.update(m)
+
+            kfs[current_kf] = {
+                "times": np.array(times).flatten(),
+                "ys": np.array(ys).flatten(),
+                "preds": np.array(preds).flatten(),
+                "meas": np.array(meas).flatten(),
+            }
+            current_kf += 1
+            times = []
+            preds = []
+            ys = []
+            meas = []
+
+        times.append(t)
+        meas.append(m)
+        preds.append(f.x)
+        ys.append(f.y)
+
+    return kfs, np.array(resids).flatten()
+
+
 def calc_sawtooth_one(times, pats):
 
     # Shift to zero for easy plotting
@@ -69,44 +134,85 @@ def calc_sawtooth_one(times, pats):
     x = x[0:2000]
     y = y[0:2000]
 
+    med = np.median(y)
+
+    cut = np.where(abs(y - med) < 0.02)
+    x = x[cut]
+    y = y[cut]
+
     period = 60
     amp = 25 / 1000
 
     windows = (x[-1] - x[0]) / (60 * 60)
-    print(windows)
+    # print(windows)
+
+    kfs, resids = kf(x, y)
 
     st, fitp = fit_sawtooth_phase(x, y, period, amp)
     print(fitp)
 
-    # N = len(x)
-    # a = np.convolve(x, 50, mode="valid")
-    # print(a)
-    # print(a.shape)
-
-    dx = x[1] - x[0]
-    dydx = np.gradient(y, dx)
-    print(dydx)
-
     fixed_st = (y - st) + (fitp[1] - amp / 2)
 
     # Sawtooth y values for plotting
-    poly = np.polyfit(x, y, deg=100)
-    z = np.poly1d(poly)
+    # poly = np.polyfit(x, y, deg=100)
+    # z = np.poly1d(poly)
+    # ax.plot(x, z(x), alpha=0.8, color="red")
 
     fig, ax = plt.subplots()
+    ax.scatter(x, y, marker="x", label="Original Data")
+    ax.scatter(x, st, marker=".", color="red", label="Attempted Sawtooth Fit")
+    # ax.scatter(x, fixed_st, alpha=0.5, marker=".")
 
-    ax.scatter(x, y, marker="x")
-    ax.scatter(x, st, marker=".", color="red")
-    ax.scatter(x, fixed_st, alpha=0.5, marker=".")
-    ax.plot(x, z(x), alpha=0.8, color="red")
+    mins = [k["preds"][0] for i, k in kfs.items()]
+    offset = np.median(mins)
+    print(f"Offset: {offset}")
 
-    ax.scatter(x, dydx + fitp[1], color="green")
+    #
+    for i, k in kfs.items():
+
+        poly = np.polyfit(k["times"], k["preds"], 1)
+        poly1d = np.poly1d(poly)
+        print(poly1d)
+
+        ax.scatter(
+            k["times"], k["preds"], color="green", marker=".", label="KF Predict"
+        )
+        ax.plot(
+            k["times"],
+            poly1d(k["times"]),
+            color="orange",
+            label="Line Fit to KF Predict",
+        )
+
+        fixed = k["meas"] - k["preds"] + offset
+
+        ax.scatter(k["times"], fixed, color="black", label="Corrected by KF fit")
+
+    # ax.scatter(x[1:], resids, color="pink", marker=".", s=2)
+    # ax.scatter(x[1:], ys, color="pink")
+    # ax.scatter(x[1:], s)
+    # ax.scatter(x[1:], si + 1.2)
+
+    # idx = np.where(si > 0.1)
+    # ax.scatter(x[idx], si[idx], color="red")
+
+    # ax.scatter(x[:-1], z + fitp[1], color="pink")
 
     print(f"orig: {np.mean(y)}")
     print(f"orig std: {np.std(y)}")
     print(f"st: {np.mean(fixed_st)}")
     print(f"st std: {np.std(fixed_st)}")
 
+    plt.legend(
+        [
+            "Original Data",
+            "Original Sawtooth Fit",
+            "KF Predict",
+            "KF Predict Line Fit",
+            "Corrected by KF Fit",
+        ],
+        loc="upper right",
+    )
     plt.show()
 
     return y
@@ -140,12 +246,12 @@ def calc_hist(df, dobs):
         more_one_month = data[data["age_days"] > 30]
         # print(data.head())
 
-        # # Data check
-        _, sd1, sd2, sd_ratio, _ = poincare(rpeaks=data["times"], show=False)
-        plt.close()
-        if sd1 < 10 or sd2 < 10:
-            print("Low SD, skipping")
-            continue
+        # # # Data check
+        # _, sd1, sd2, sd_ratio, _ = poincare(rpeaks=data["times"], show=False)
+        # plt.close()
+        # if sd1 < 10 or sd2 < 10:
+        #     print("Low SD, skipping")
+        #     continue
 
         df = data[data["valid_correction"] > 0].sort_values("times")
 

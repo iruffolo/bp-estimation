@@ -16,6 +16,8 @@ class WindowStatus(Enum):
     POOR_PPG_QUALITY = 6
     INSUFFICIENT_PATS = 7
     BM_FAILED = 8
+    TOTAL_BEATS = 9
+    TOTAL_BEATS_DROPPED = 10
 
 
 class Logger:
@@ -58,23 +60,33 @@ class Logger:
             WindowStatus.POOR_PPG_QUALITY.name: 0,
             WindowStatus.INSUFFICIENT_PATS.name: 0,
             WindowStatus.BM_FAILED.name: 0,
+            WindowStatus.TOTAL_BEATS.name: 0,
+            WindowStatus.TOTAL_BEATS_DROPPED.name: 0,
         }
+
+        self.heartbeats = 0
+        self.heartbeats_dropped = 0
 
         # Every X windows, log results then reset
         self.log_rate = 10
         self.results = []
 
-    def log_status(self, status: WindowStatus):
+    def log_status(self, status: WindowStatus, value=1):
         """
         Log an error or success for a window
 
         :param status: The error to log
         """
 
-        self.window_stats[status.name] += 1
+        self.window_stats[status.name] += value
 
         if self.verbose:
-            print(f"Window Status: {status.name}")
+            print(f"Window Status: {status.name}:{value}")
+
+        if (
+            status.name is not WindowStatus.TOTAL_BEATS
+            and status.name is not WindowStatus.TOTAL_BEATS_DROPPED
+        ):
             self.pbar.update(1)
 
     def log_data(self, pid, dob, start, n_corrected, s1, s2, hr, synced):

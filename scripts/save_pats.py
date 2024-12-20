@@ -29,7 +29,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/beat_matching/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/beat_matching2/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -39,13 +39,20 @@ def save_pats(sdk, dev, itr, early_stop=None):
         else:
             # Check patient age
             info = sdk.get_patient_info(w.patient_id)
-            t = datetime.fromtimestamp(w.start_time / 10**9).year
-            dob = datetime.fromtimestamp(info["dob"] / 10**9).year
-            age_at_visit = t - dob
+            t = datetime.fromtimestamp(w.start_time / 10**9)
+            dob = datetime.fromtimestamp(info["dob"] / 10**9)
+            age_at_visit = t.year - dob.year
             # if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
-        #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
-        #         continue
-        print(f"Processing patient dev {dev}, date: {t}, age: {age_at_visit}")
+            #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
+            #         continue
+
+            if t >= datetime(year=2022, month=6, day=1):
+                print(f"Skipping post 2022: {t}")
+                continue
+
+        print(
+            f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit}"
+        )
 
         # Extract data from window and validate
         for (signal, freq, _), v in w.signals.items():
@@ -88,37 +95,41 @@ def save_pats(sdk, dev, itr, early_stop=None):
             matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
             # print(f"Matched beats: {len(matching_beats)}")
             assert len(matching_beats) > 0, "BM failed to find any matching beats"
+            log.log_status(WindowStatus.TOTAL_BEATS, len(ecg_peak_times))
+            log.log_status(
+                WindowStatus.TOTAL_BEATS_DROPPED,
+                len(ecg_peak_times) - len(matching_beats),
+            )
 
             # Create a df for all possible PAT values
             all_pats = pd.DataFrame(
                 [m.possible_pats for m in matching_beats],
                 columns=[f"{i + 1} beats" for i in range(ssize)],
             )
-
             all_pats["bm_pat"] = [m.possible_pats[m.n_peaks] for m in matching_beats]
             all_pats["confidence"] = [m.confidence for m in matching_beats]
             all_pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
             all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
 
-            correct_pats(all_pats, matching_beats, pat_range=0.300)
+            correct_pats(all_pats, matching_beats, pat_range=0.100)
             # print(all_pats.head())
 
-            log.log_raw_data(
-                {
-                    "ecg_peaks": ecg_peak_times,
-                },
-                f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ecg",
-            )
-            log.log_raw_data(
-                {
-                    "ppg_peaks": ppg_peak_times,
-                },
-                f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ppg",
-            )
+            # log.log_raw_data(
+            #     {
+            #         "ecg_peaks": ecg_peak_times,
+            #     },
+            #     f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ecg",
+            # )
+            # log.log_raw_data(
+            #     {
+            #         "ppg_peaks": ppg_peak_times,
+            #     },
+            #     f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ppg",
+            # )
+
             log.log_raw_data(
                 all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pat"
             )
-
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -158,7 +169,7 @@ def run(local_dataset, window_size, gap_tol, device):
         gap_tol,
         device=device,
         prefetch=10,
-        shuffle=True,
+        shuffle=False,
     )
     save_pats(sdk, device, itr)
 
@@ -166,9 +177,6 @@ def run(local_dataset, window_size, gap_tol, device):
 
 
 if __name__ == "__main__":
-
-    # Newest dataset with Philips measures (SBP, DBP, MAP) (incomplete, 90%)
-    # local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
 
     # Newest dataset
     local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
@@ -178,11 +186,13 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 5 * 60 * 60  # 60 min
-    gap_tol = 60 * 60  # 30 min to reduce overlapping windows with gap tol
+    window_size = 5 * 60 * 60  # 10 hr
+    gap_tol = 2 * 60 * 60  # 30 min to reduce overlapping windows with gap tol
 
-    # itr = make_device_itr_ecg_ppg(sdk, window_size, gap_tol, device=80)
-    # save_pats(sdk, 85, itr, early_stop=50)
+    # itr = make_device_itr_ecg_ppg(
+    #     sdk, window_size, gap_tol, device=80, prefetch=1, shuffle=True
+    # )
+    # save_pats(sdk, 85, itr, early_stop=50000)
     # exit()
 
     num_cores = 20  # len(devices)

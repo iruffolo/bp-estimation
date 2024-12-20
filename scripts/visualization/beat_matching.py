@@ -116,7 +116,7 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
 
     # Precalculate quality index for entire PPG signal
     # ecg_quality = get_quality_index(ecg_peak_times)
-    # ppg_quality = get_quality_index(ppg_peak_times)
+    ppg_quality = get_quality_index(ppg_peak_times)
 
     matching_beats = list()
 
@@ -133,10 +133,9 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
             continue
 
         # Signal quality passed and within idx bounds for search
-        if (idx + wsize + ssize) < ppg_peak_times.size:
-            # and
-            #     # ppg_quality[idx : idx + wsize + ssize].all()
-            # ):
+        if (idx + wsize + ssize) < ppg_peak_times.size and ppg_quality[
+            idx : idx + wsize + ssize
+        ].all():
 
             # Calculate distance for each PPG peak in search window
             euclidean = np.array(

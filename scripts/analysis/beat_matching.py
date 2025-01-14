@@ -221,11 +221,6 @@ def calc_sawtooth_one(times, pats, name):
             print("skipping")
             continue
 
-        print(k["times"], k["preds"])
-        print(len(k["times"]))
-
-        print("am i getting here")
-
         poly = np.polyfit(k["times"], k["preds"], 1)
         poly1d = np.poly1d(poly)
 

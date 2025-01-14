@@ -6,7 +6,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
-
+from kf_sawtooth import calc_sawtooth
 from utils.atriumdb_helpers import make_device_itr_all_signals, make_device_itr_ecg_ppg
 from utils.logger import Logger, WindowStatus
 from visualization.beat_matching import (
@@ -29,7 +29,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/beat_matching/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/st_correction/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -45,10 +45,9 @@ def save_pats(sdk, dev, itr, early_stop=None):
             # if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
             #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
             #         continue
-
-            if t >= datetime(year=2022, month=6, day=1):
-                print(f"Skipping post 2022: {t}")
-                continue
+            # if t >= datetime(year=2022, month=6, day=1):
+            #     print(f"Skipping post 2022: {t}")
+            # continue
 
         print(
             f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit}"
@@ -112,24 +111,19 @@ def save_pats(sdk, dev, itr, early_stop=None):
             all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
 
             correct_pats(all_pats, matching_beats, pat_range=0.100)
-            # print(all_pats.head())
+            df = all_pats[all_pats["valid_correction"] > 0]
 
-            # log.log_raw_data(
-            #     {
-            #         "ecg_peaks": ecg_peak_times,
-            #     },
-            #     f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ecg",
-            # )
-            # log.log_raw_data(
-            #     {
-            #         "ppg_peaks": ppg_peak_times,
-            #     },
-            #     f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_ppg",
-            # )
+            fn = f"{w.patient_id}_{dev}_{i}"
+            corr, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"], fn)
 
-            log.log_raw_data(
-                all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pat"
-            )
+            p1["p_id"] = np.full_like(p1["slope_ppm"], w.patient_id).astype(int)
+            p2["p_id"] = np.full_like(p2["slope_ppm"], w.patient_id).astype(int)
+
+            log.log_raw_data(p1, f"st1_params")
+            log.log_raw_data(p2, f"st2_params")
+            # log.log_raw_data(
+            #     all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pat"
+            # )
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -157,7 +151,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
     print(f"Finished processing device {dev}")
 
 
-def run(local_dataset, window_size, gap_tol, device):
+def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=None):
     """
     Function to run in parallel
     """
@@ -168,8 +162,10 @@ def run(local_dataset, window_size, gap_tol, device):
         window_size,
         gap_tol,
         device=device,
-        prefetch=10,
+        prefetch=20,
         shuffle=False,
+        start_nano=start_nano,
+        end_nano=end_nano,
     )
     save_pats(sdk, device, itr)
 
@@ -186,8 +182,14 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 5 * 60 * 60  # 10 hr
-    gap_tol = 2 * 60 * 60  # 30 min to reduce overlapping windows with gap tol
+    window_size = 1 * 60 * 60  # 10 hr
+    gap_tol = 5 * 60  # 30 min to reduce overlapping windows with gap tol
+
+    start = None
+    end = datetime(year=2022, month=6, day=1).timestamp() * (10**9)
+
+    # run(local_dataset, window_size, gap_tol, 80, start, end)
+    # exit()
 
     # itr = make_device_itr_ecg_ppg(
     #     sdk, window_size, gap_tol, device=80, prefetch=1, shuffle=True
@@ -200,7 +202,8 @@ if __name__ == "__main__":
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {
-            pp.submit(run, local_dataset, window_size, gap_tol, d): d for d in devices
+            pp.submit(run, local_dataset, window_size, gap_tol, d, start, end): d
+            for d in devices
         }
 
         for f in concurrent.futures.as_completed(futures):

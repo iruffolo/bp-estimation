@@ -266,6 +266,8 @@ def make_device_itr_ecg_ppg(
     device=None,
     prefetch=10,
     shuffle=False,
+    start_nano=None,
+    end_nano=None,
 ):
     """
     Creates new SDK instance and iterator for a specific device
@@ -299,12 +301,20 @@ def make_device_itr_ecg_ppg(
 
     ecg_intervals = Intervals(
         sdk.get_interval_array(
-            ecg_id, device_id=device, gap_tolerance_nano=gap_tol_nano
+            ecg_id,
+            device_id=device,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start_nano,
+            end=end_nano,
         )
     )
     ppg_intervals = Intervals(
         sdk.get_interval_array(
-            ppg_id, device_id=device, gap_tolerance_nano=gap_tol_nano
+            ppg_id,
+            device_id=device,
+            gap_tolerance_nano=gap_tol_nano,
+            start=start_nano,
+            end=end_nano,
         )
     )
 

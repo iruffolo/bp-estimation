@@ -29,7 +29,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/beat_matching2/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/beat_matching/", verbose=True)
 
     for i, w in enumerate(itr):
 
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     # save_pats(sdk, 85, itr, early_stop=50000)
     # exit()
 
-    num_cores = 20  # len(devices)
+    num_cores = 15  # len(devices)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 

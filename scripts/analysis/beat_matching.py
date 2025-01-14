@@ -123,6 +123,11 @@ def kf(x, y, thresh=0.02, slope=0.04 / 60, fail_count=2):
             f.predict(u=u)
             f.update(m)
 
+            times.append(t)
+            meas.append(m)
+            preds.append(f.x)
+            ys.append(f.y)
+
         # if its not, do nothing
         else:
             fail_data.append((t, dx, m))
@@ -159,11 +164,6 @@ def kf(x, y, thresh=0.02, slope=0.04 / 60, fail_count=2):
 
         # resids.append(f.y)
         # probs.append(f.mahalanobis)
-
-        times.append(t)
-        meas.append(m)
-        preds.append(f.x)
-        ys.append(f.y)
 
     kfs[current_kf] = {
         "times": np.array(times).flatten(),
@@ -216,6 +216,16 @@ def calc_sawtooth_one(times, pats, name):
     params2 = []
 
     for i, k in kfs.items():
+
+        if len(k["times"]) < 10:
+            print("skipping")
+            continue
+
+        print(k["times"], k["preds"])
+        print(len(k["times"]))
+
+        print("am i getting here")
+
         poly = np.polyfit(k["times"], k["preds"], 1)
         poly1d = np.poly1d(poly)
 
@@ -238,6 +248,7 @@ def calc_sawtooth_one(times, pats, name):
 
         # fixed = k["meas"] - k["preds"] + offset
         fixed = k["meas"] - k["preds"] + k["preds"][0]
+
         for z in fixed:
             new_data.append(z)
 
@@ -252,6 +263,10 @@ def calc_sawtooth_one(times, pats, name):
 
     kfs2 = kf(x, new_data, 0.011, 0.02 / 160, 5)
     for i, k in kfs2.items():
+        if len(k["times"]) < 10:
+            print("skipping")
+            continue
+
         poly = np.polyfit(k["times"], k["preds"], 1)
         poly1d = np.poly1d(poly)
 
@@ -301,8 +316,8 @@ def calc_sawtooth_one(times, pats, name):
         loc="upper right",
     )
     plt.tight_layout()
-    plt.savefig(f"kfplots2/{name}.png")
-    # plt.show()
+    # plt.savefig(f"kfplots2/{name}.png")
+    plt.show()
     plt.close()
 
     return y, params, params2

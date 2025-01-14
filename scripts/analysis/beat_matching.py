@@ -66,6 +66,7 @@ def reset_kf(f, i0):
 
     f.x = np.array([i0])
     f.P *= 1000.0
+
     f.R = np.array([[0.01]])  # Measurement noise
     f.Q = np.array([0.000001])  # Process noise
 
@@ -73,10 +74,10 @@ def reset_kf(f, i0):
     f.B = np.array([1.0])
 
 
-def kf(x, y):
+def kf(x, y, thresh=0.02, slope=0.04 / 60, fail_count=2):
 
     # Expected s.t. slope = amp / period
-    slope = 0.05 / 60
+    slope = slope
 
     f = KalmanFilter(dim_x=1, dim_z=1, dim_u=1)
     reset_kf(f, y[0])
@@ -90,42 +91,91 @@ def kf(x, y):
     current_kf = 0
 
     resids = []
+    probs = []
+
+    fails = 0
+    fail_data = []
 
     diffs = np.diff(x)
     for t, dx, m in zip(x[1:], diffs, y[1:]):
 
-        u = dx * slope
-        f.predict(u=u)
-        f.update(m)
+        # Check measurment before update
+        y = f.residual_of(m)
 
-        resids.append(f.y)
+        # if residual is ok, predict and update like normal
+        if abs(y) < thresh:
+            # if there was a previous fail, predict and update 2x
+            if fails:
+                for t_f, dx_f, m_f in fail_data:
+                    u = dx_f * slope
+                    f.predict(u=u)
+                    f.update(m_f)
 
-        if abs(f.y) > 0.035:
-            reset_kf(f, m)
+                    times.append(t_f)
+                    meas.append(m_f)
+                    preds.append(f.x)
+                    ys.append(f.y)
+
+                    fails = 0
+                    fail_data = []
+
+            u = dx * slope
             f.predict(u=u)
             f.update(m)
 
-            kfs[current_kf] = {
-                "times": np.array(times).flatten(),
-                "ys": np.array(ys).flatten(),
-                "preds": np.array(preds).flatten(),
-                "meas": np.array(meas).flatten(),
-            }
-            current_kf += 1
-            times = []
-            preds = []
-            ys = []
-            meas = []
+        # if its not, do nothing
+        else:
+            fail_data.append((t, dx, m))
+            fails += 1
+
+            # if 2 fails, start new KF, initialize off buffer
+            if fails > fail_count:
+                kfs[current_kf] = {
+                    "times": np.array(times).flatten(),
+                    "ys": np.array(ys).flatten(),
+                    "preds": np.array(preds).flatten(),
+                    "meas": np.array(meas).flatten(),
+                }
+                current_kf += 1
+
+                times = []
+                preds = []
+                ys = []
+                meas = []
+
+                reset_kf(f, fail_data[0][2])
+                for t_f, dx_f, m_f in fail_data:
+                    u = dx_f * slope
+                    f.predict(u=u)
+                    f.update(m_f)
+
+                    times.append(t_f)
+                    meas.append(m_f)
+                    preds.append(f.x)
+                    ys.append(f.y)
+
+                fails = 0
+                fail_data = []
+
+        # resids.append(f.y)
+        # probs.append(f.mahalanobis)
 
         times.append(t)
         meas.append(m)
         preds.append(f.x)
         ys.append(f.y)
 
-    return kfs, np.array(resids).flatten()
+    kfs[current_kf] = {
+        "times": np.array(times).flatten(),
+        "ys": np.array(ys).flatten(),
+        "preds": np.array(preds).flatten(),
+        "meas": np.array(meas).flatten(),
+    }
+
+    return kfs  # , np.array(resids).flatten(), np.array(probs).flatten()
 
 
-def calc_sawtooth_one(times, pats):
+def calc_sawtooth_one(times, pats, name):
 
     # Shift to zero for easy plotting
     x = times.values - times.iloc[0]
@@ -146,33 +196,35 @@ def calc_sawtooth_one(times, pats):
     windows = (x[-1] - x[0]) / (60 * 60)
     # print(windows)
 
-    kfs, resids = kf(x, y)
+    kfs = kf(x, y)
 
-    st, fitp = fit_sawtooth_phase(x, y, period, amp)
-    print(fitp)
-
-    fixed_st = (y - st) + (fitp[1] - amp / 2)
-
-    # Sawtooth y values for plotting
-    # poly = np.polyfit(x, y, deg=100)
-    # z = np.poly1d(poly)
-    # ax.plot(x, z(x), alpha=0.8, color="red")
+    # st, fitp = fit_sawtooth_phase(x, y, period, amp)
+    # print(fitp)
+    # fixed_st = (y - st) + (fitp[1] - amp / 2)
 
     fig, ax = plt.subplots()
-    ax.scatter(x, y, marker="x", label="Original Data")
-    ax.scatter(x, st, marker=".", color="red", label="Attempted Sawtooth Fit")
+    ax.scatter(x, y, marker="x", label="Original Data", s=1.5)
+    # ax.scatter(x, st, marker=".", color="red", label="Attempted Sawtooth Fit")
     # ax.scatter(x, fixed_st, alpha=0.5, marker=".")
 
     mins = [k["preds"][0] for i, k in kfs.items()]
     offset = np.median(mins)
     print(f"Offset: {offset}")
 
-    #
-    for i, k in kfs.items():
+    new_data = []
+    params = []
+    params2 = []
 
+    for i, k in kfs.items():
         poly = np.polyfit(k["times"], k["preds"], 1)
         poly1d = np.poly1d(poly)
-        print(poly1d)
+
+        slope = poly1d.c[0] * 1000
+        period = k["times"][-1] - k["times"][0]
+        # Cut the first and last
+        if i > 0 and i < len(kfs) - 1:
+            params.append((slope, period))
+            # print(slope, period)
 
         ax.scatter(
             k["times"], k["preds"], color="green", marker=".", label="KF Predict"
@@ -184,38 +236,109 @@ def calc_sawtooth_one(times, pats):
             label="Line Fit to KF Predict",
         )
 
-        fixed = k["meas"] - k["preds"] + offset
+        # fixed = k["meas"] - k["preds"] + offset
+        fixed = k["meas"] - k["preds"] + k["preds"][0]
+        for z in fixed:
+            new_data.append(z)
 
-        ax.scatter(k["times"], fixed, color="black", label="Corrected by KF fit")
+        ax.scatter(
+            k["times"],
+            fixed,
+            color="black",
+            label="Corrected by KF fit",
+            s=1.5,
+            alpha=0.8,
+        )
+
+    kfs2 = kf(x, new_data, 0.011, 0.02 / 160, 5)
+    for i, k in kfs2.items():
+        poly = np.polyfit(k["times"], k["preds"], 1)
+        poly1d = np.poly1d(poly)
+
+        slope = poly1d.c[0] * 1000
+        period = k["times"][-1] - k["times"][0]
+        # Cut the first and last
+        if i > 0 and i < len(kfs) - 1:
+            params2.append((slope, period))
+
+        ax.scatter(
+            k["times"], k["preds"], color="purple", marker=".", label="KF Predict"
+        )
+        ax.plot(
+            k["times"],
+            poly1d(k["times"]),
+            color="blue",
+            label="Line Fit to KF Predict",
+        )
+        fixed = k["meas"] - k["preds"] + k["preds"][0]
+
+        # ax.scatter(
+        #     k["times"],
+        #     fixed,
+        #     color="grey",
+        #     label="Corrected by KF fit",
+        #     s=1.1,
+        #     alpha=0.8,
+        # )
 
     # ax.scatter(x[1:], resids, color="pink", marker=".", s=2)
+    # ax.scatter(x[1:], probs, color="blue", marker=".", s=2)
     # ax.scatter(x[1:], ys, color="pink")
     # ax.scatter(x[1:], s)
     # ax.scatter(x[1:], si + 1.2)
-
     # idx = np.where(si > 0.1)
     # ax.scatter(x[idx], si[idx], color="red")
-
     # ax.scatter(x[:-1], z + fitp[1], color="pink")
-
-    print(f"orig: {np.mean(y)}")
-    print(f"orig std: {np.std(y)}")
-    print(f"st: {np.mean(fixed_st)}")
-    print(f"st std: {np.std(fixed_st)}")
 
     plt.legend(
         [
             "Original Data",
-            "Original Sawtooth Fit",
+            # "Original Sawtooth Fit",
             "KF Predict",
             "KF Predict Line Fit",
             "Corrected by KF Fit",
         ],
         loc="upper right",
     )
-    plt.show()
+    plt.tight_layout()
+    plt.savefig(f"kfplots2/{name}.png")
+    # plt.show()
+    plt.close()
 
-    return y
+    return y, params, params2
+
+
+def get_st_params(df, dobs):
+
+    slopes_st1 = []
+    periods_st1 = []
+    slopes_st2 = []
+    periods_st2 = []
+
+    for idx, row in df.iterrows():
+
+        data = pd.read_csv(row["files"])
+
+        df2 = data[data["valid_correction"] > 0].sort_values("times")
+
+        st, p1, p2 = calc_sawtooth_one(df2["times"], df2["corrected_bm_pat"], idx)
+
+        slope = [p[0] for p in p1]
+        period = [p[1] for p in p1]
+        slopes_st1.append(slope)
+        periods_st1.append(period)
+
+        slope = [p[0] for p in p2]
+        period = [p[1] for p in p2]
+        slopes_st2.append(slope)
+        periods_st2.append(period)
+
+    slopes_st1 = np.concatenate(slopes_st1).ravel()
+    periods_st1 = np.concatenate(periods_st1).ravel()
+    slopes_st2 = np.concatenate(slopes_st2).ravel()
+    periods_st2 = np.concatenate(periods_st2).ravel()
+
+    return slopes_st1, periods_st1, slopes_st2, periods_st2
 
 
 def calc_hist(df, dobs):
@@ -255,7 +378,7 @@ def calc_hist(df, dobs):
 
         df = data[data["valid_correction"] > 0].sort_values("times")
 
-        st = calc_sawtooth_one(df["times"], df["corrected_bm_pat"])
+        st, p1 = calc_sawtooth_one(df["times"], df["corrected_bm_pat"])
 
         if len(one_month) > 0:
             for day in one_month["age_days"].unique():
@@ -315,7 +438,6 @@ if __name__ == "__main__":
 
     # datapath = "/home/ian/dev/bp-estimation/data/beat_matching/"
     datapath = "/home/ian/dev/bp-estimation/data/beat_matching2/"
-
     dobpath = "/home/ian/dev/bp-estimation/data/ian_dataset_dobs.csv"
     dobs = pd.read_csv(dobpath)
 
@@ -338,15 +460,58 @@ if __name__ == "__main__":
             patients["date"].append(datetime(year=int(year), month=int(month), day=1))
 
     df = pd.DataFrame(patients)
-    pre = df[df["date"] <= "2022-06-01"]
-    h1, h2 = calc_hist(pre, dobs)
+    # pre = df[df["date"] <= "2022-06-01"]
+    # h1, h2 = calc_hist(pre, dobs)
+    s1, p1, s2, p2 = get_st_params(df, dobs)
 
-    df1 = pd.DataFrame(h1)
-    df2 = pd.DataFrame(h2)
+    print(
+        f"Slopes ST1\n"
+        f"Length: {np.shape(s1)}\n"
+        f"Mean: {np.mean(s1)}\n"
+        f"Std: {np.std(s1)}\n"
+    )
+    print(
+        f"Periods ST1\n"
+        f"Length: {np.shape(p1)}\n"
+        f"Mean: {np.mean(p1)}\n"
+        f"Std: {np.std(p1)}\n"
+    )
+    print(
+        f"Slopes ST2\n"
+        f"Length: {np.shape(s2)}\n"
+        f"Mean: {np.mean(s2)}\n"
+        f"Std: {np.std(s2)}\n"
+    )
+    print(
+        f"Periods ST2\n"
+        f"Length: {np.shape(p2)}\n"
+        f"Mean: {np.mean(p2)}\n"
+        f"Std: {np.std(p2)}\n"
+    )
 
-    save_path = "/home/ian/dev/bp-estimation/data"
-    fn1 = os.path.join(save_path, "daily_hists.csv")
-    fn2 = os.path.join(save_path, "monthly_hists.csv")
+    fig, ax = plt.subplots()
+    ax.hist(s2, bins=100)
+    ax.set_xlabel("Slope (s of PAT / s in time)")
+    plt.title(f"Slopes: mean={np.mean(s2):.3f}, std={np.std(s2):.3f}")
+    # plt.show()
+    plt.tight_layout()
+    plt.savefig("kfplots2/slopes_hist.png")
+    plt.close()
 
-    df1.to_csv(fn1, header="column_names", index=False)
-    df2.to_csv(fn2, header="column_names", index=False)
+    fig, ax = plt.subplots()
+    ax.hist(p2, bins=100)
+    ax.set_xlabel("Period")
+    plt.title(f"Periods: mean={np.mean(p2):.3f}, std={np.std(p2):.3f}")
+    # plt.show()
+    plt.tight_layout()
+    plt.savefig("kfplots2/periods_hist.png")
+    plt.close()
+
+    # df1 = pd.DataFrame(h1)
+    # df2 = pd.DataFrame(h2)
+    #
+    # save_path = "/home/ian/dev/bp-estimation/data"
+    # fn1 = os.path.join(save_path, "daily_hists.csv")
+    # fn2 = os.path.join(save_path, "monthly_hists.csv")
+    # df1.to_csv(fn1, header="column_names", index=False)
+    # df2.to_csv(fn2, header="column_names", index=False)

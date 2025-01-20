@@ -36,22 +36,6 @@ def save_pats(sdk, dev, itr, early_stop=None):
         if not w.patient_id:
             log.log_status(WindowStatus.NO_PATIENT_ID)
             continue
-        else:
-            # Check patient age
-            info = sdk.get_patient_info(w.patient_id)
-            t = datetime.fromtimestamp(w.start_time / 10**9)
-            dob = datetime.fromtimestamp(info["dob"] / 10**9)
-            age_at_visit = t.year - dob.year
-            # if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
-            #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
-            #         continue
-            # if t >= datetime(year=2022, month=6, day=1):
-            #     print(f"Skipping post 2022: {t}")
-            # continue
-
-        print(
-            f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit}"
-        )
 
         # Extract data from window and validate
         for (signal, freq, _), v in w.signals.items():
@@ -85,46 +69,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
                 )
                 ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-            date = datetime.fromtimestamp(ecg["times"][0])
-
-            assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
-            assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
-
-            ssize = 6
-            matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
-            # print(f"Matched beats: {len(matching_beats)}")
-            assert len(matching_beats) > 0, "BM failed to find any matching beats"
-            log.log_status(WindowStatus.TOTAL_BEATS, len(ecg_peak_times))
-            log.log_status(
-                WindowStatus.TOTAL_BEATS_DROPPED,
-                len(ecg_peak_times) - len(matching_beats),
-            )
-
-            # Create a df for all possible PAT values
-            all_pats = pd.DataFrame(
-                [m.possible_pats for m in matching_beats],
-                columns=[f"{i + 1} beats" for i in range(ssize)],
-            )
-            all_pats["bm_pat"] = [m.possible_pats[m.n_peaks] for m in matching_beats]
-            all_pats["confidence"] = [m.confidence for m in matching_beats]
-            all_pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
-            all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
-
-            correct_pats(all_pats, matching_beats, pat_range=0.100)
-            df = all_pats[all_pats["valid_correction"] > 0]
-
-            fn = f"{w.patient_id}_{dev}_{i}"
-            corr, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"], fn)
-
-            p1["p_id"] = np.full_like(p1["slope_ppm"], w.patient_id).astype(int)
-            p2["p_id"] = np.full_like(p2["slope_ppm"], w.patient_id).astype(int)
-
-            log.log_raw_data(p1, f"st1_params")
-            log.log_raw_data(p2, f"st2_params")
-            # log.log_raw_data(
-            #     all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pat"
-            # )
-            log.log_status(WindowStatus.SUCCESS)
+            print(ppg_peak_times)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
         except AssertionError as e:
@@ -162,7 +107,7 @@ def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=N
         window_size,
         gap_tol,
         device=device,
-        prefetch=10,
+        prefetch=1,
         shuffle=False,
         start_nano=start_nano,
         end_nano=end_nano,
@@ -182,33 +127,13 @@ if __name__ == "__main__":
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 1 * 60 * 60  # 10 hr
-    gap_tol = 5 * 60  # 30 min to reduce overlapping windows with gap tol
+    window_size = 1 * 60 * 60
+    gap_tol = 30
 
-    # start = None
-    start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
-    # end = datetime(year=2022, month=6, day=1).timestamp() * (10**9)
-    end = None
+    # start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
+    # end = None
 
-    # run(local_dataset, window_size, gap_tol, 80, start, end)
-    # exit()
+    start = None
+    end = datetime(year=2022, month=6, day=1).timestamp() * (10**9)
 
-    # itr = make_device_itr_ecg_ppg(
-    #     sdk, window_size, gap_tol, device=80, prefetch=1, shuffle=True
-    # )
-    # save_pats(sdk, 85, itr, early_stop=50000)
-    # exit()
-
-    num_cores = 15  # len(devices)
-
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
-
-        futures = {
-            pp.submit(run, local_dataset, window_size, gap_tol, d, start, end): d
-            for d in devices
-        }
-
-        for f in concurrent.futures.as_completed(futures):
-            print(f.result())
-
-    print("Finished processing")
+    run(local_dataset, window_size, gap_tol, 80, start, end)

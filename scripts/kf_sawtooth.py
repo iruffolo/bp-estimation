@@ -118,7 +118,7 @@ def kf(x, y, thresh=0.02, slope=0.04 / 60, fail_count=2):
     return kfs
 
 
-def calc_sawtooth(times, pats, fn=None):
+def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
 
     med = np.median(pats)
     cut = np.where(abs(pats - med) < 0.02)
@@ -126,8 +126,9 @@ def calc_sawtooth(times, pats, fn=None):
     x = times.values[cut]
     y = pats.values[cut]
 
-    fig, ax = plt.subplots()
-    ax.scatter(x, y, marker="x", label="Original Data", s=1.5)
+    if plot:
+        fig, ax = plt.subplots()
+        ax.scatter(x, y, marker="x", label="Original Data", s=1.5)
 
     kfs = kf(x, y)
 
@@ -166,23 +167,24 @@ def calc_sawtooth(times, pats, fn=None):
         for z in fixed:
             new_data.append(z)
 
-        # ax.scatter(
-        #     k["times"], k["preds"], color="green", marker=".", label="KF Predict"
-        # )
-        # ax.plot(
-        #     k["times"],
-        #     poly1d(k["times"]),
-        #     color="orange",
-        #     label="Line Fit to KF Predict",
-        # )
-        # ax.scatter(
-        #     k["times"],
-        #     fixed,
-        #     color="black",
-        #     label="Corrected by KF fit",
-        #     s=1.5,
-        #     alpha=0.8,
-        # )
+        if plot:
+            ax.scatter(
+                k["times"], k["preds"], color="green", marker=".", label="KF Predict"
+            )
+            ax.plot(
+                k["times"],
+                poly1d(k["times"]),
+                color="orange",
+                label="Line Fit to KF Predict",
+            )
+            ax.scatter(
+                k["times"],
+                fixed,
+                color="black",
+                label="Corrected by KF fit",
+                s=1.5,
+                alpha=0.8,
+            )
 
     kfs2 = kf(x, new_data, 0.011, 0.02 / 160, 5)
 
@@ -201,34 +203,36 @@ def calc_sawtooth(times, pats, fn=None):
             params_st2["period"].append(period)
             params_st2["points"].append(len(k["times"]))
 
-        # ax.scatter(
-        #     k["times"], k["preds"], color="purple", marker=".", label="KF Predict"
-        # )
-        # ax.plot(
-        #     k["times"],
-        #     poly1d(k["times"]),
-        #     color="blue",
-        #     label="Line Fit to KF Predict",
-        # )
+        if plot:
+            ax.scatter(
+                k["times"], k["preds"], color="purple", marker=".", label="KF Predict"
+            )
+            ax.plot(
+                k["times"],
+                poly1d(k["times"]),
+                color="blue",
+                label="Line Fit to KF Predict",
+            )
 
         fixed = k["meas"] - k["preds"] + k["preds"][0]
 
         for z in fixed:
             corrected.append(z)
 
-    # plt.legend(
-    #     [
-    #         "Original Data",
-    #         "KF Predict",
-    #         "KF Predict Line Fit",
-    #         "Corrected by KF Fit",
-    #     ],
-    #     loc="upper right",
-    # )
-    # plt.tight_layout()
-    # if fn:
-    #     plt.savefig(f"../data/st_plots/{fn}.png")
-    # # plt.show()
-    # plt.close()
+    if plot:
+        plt.legend(
+            [
+                "Original Data",
+                "KF Predict",
+                "KF Predict Line Fit",
+                "Corrected by KF Fit",
+            ],
+            loc="upper right",
+        )
+        plt.tight_layout()
+        if fn:
+            plt.savefig(f"../data/st_plots_post/{fn}.png")
+        # plt.show()
+        plt.close()
 
     return corrected, params_st1, params_st2

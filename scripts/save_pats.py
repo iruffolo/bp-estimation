@@ -31,6 +31,35 @@ def save_pats(sdk, dev, itr, early_stop=None):
     num_windows = early_stop if early_stop else itr._length
     log = Logger(dev, num_windows, path="../data/st_correction_post/", verbose=True)
 
+    age_bins_day = np.linspace(0, 30, 31)
+    age_bins_month = [
+        1,  # 1-3 months
+        3,  # 3-6 months
+        6,  # 6-9 months
+        9,  # 9-12 months
+        12,  # 12-18 months
+        18,  # 18-24 months
+        24,  # 2-3 years
+        36,  # 3-4 years
+        48,  # 4-6 years
+        72,  # 6-8 years
+        96,  # 8-12 years
+        144,  # 12-15 years
+        180,  # 15-18 years
+        216,  # 18+
+    ]
+
+    bins = 5000
+    bin_range = (0, 5)
+
+    _, edges = np.histogram([], bins=bins, range=bin_range)
+    hists_day = {
+        age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins_day
+    }
+    hists_month = {
+        age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins_month
+    }
+
     for i, w in enumerate(itr):
 
         if not w.patient_id:
@@ -42,6 +71,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
             t = datetime.fromtimestamp(w.start_time / 10**9)
             dob = datetime.fromtimestamp(info["dob"] / 10**9)
             age_at_visit = t.year - dob.year
+
             # if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
             #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
             #         continue

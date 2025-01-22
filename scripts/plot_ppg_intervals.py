@@ -3,6 +3,8 @@ import os
 import warnings
 from datetime import datetime
 
+import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
@@ -69,7 +71,28 @@ def save_pats(sdk, dev, itr, early_stop=None):
                 )
                 ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-            print(ppg_peak_times)
+
+            fig, ax = plt.subplots(1,3)
+
+            csum = np.cumsum(np.diff(ppg_peak_times))
+            print(csum)
+
+            x = ppg_peak_times[:-1] - ppg_peak_times[0]
+
+            poly = np.polyfit(x, csum, 1)
+            poly1d = np.poly1d(poly)
+
+            y = csum - poly1d(x)
+
+            ax[0].plot(ppg_peak_times[:-1], np.diff(ppg_peak_times))
+            ax[1].scatter(x, csum, s=0.5, marker='x')
+            ax[1].plot(x, poly1d(x))
+            ax[1].set_title("cumsum")
+            ax[2].scatter(x, y, s=0.5)
+            ax[2].set_title("detrended cumsum")
+
+            plt.show()
+
 
         # Peak detection faliled to detect enough peaks in calculate_pat
         except AssertionError as e:
@@ -120,14 +143,15 @@ def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=N
 if __name__ == "__main__":
 
     # Newest dataset
-    local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
+    # local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
+    local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
 
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 1 * 60 * 60
+    window_size = 1 * 10 * 60
     gap_tol = 30
 
     # start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)

@@ -265,6 +265,7 @@ def make_device_itr_ecg_ppg(
     gap_tol,
     device=None,
     prefetch=10,
+    cache=1,
     shuffle=False,
     start_nano=None,
     end_nano=None,
@@ -335,6 +336,7 @@ def make_device_itr_ecg_ppg(
         window_slide=window_size,
         gap_tolerance=gap_tol,
         num_windows_prefetch=prefetch,
+        cached_windows_per_source=cache,
         time_units="s",
         shuffle=shuffle,
     )

@@ -29,35 +29,27 @@ def save_pats(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/st_correction_post/", verbose=True)
+    log = Logger(dev, num_windows, path="../data/result_histograms/", verbose=True)
 
-    age_bins_day = np.linspace(0, 30, 31)
-    age_bins_month = [
-        1,  # 1-3 months
-        3,  # 3-6 months
-        6,  # 6-9 months
-        9,  # 9-12 months
-        12,  # 12-18 months
-        18,  # 18-24 months
-        24,  # 2-3 years
-        36,  # 3-4 years
-        48,  # 4-6 years
-        72,  # 6-8 years
-        96,  # 8-12 years
-        144,  # 12-15 years
-        180,  # 15-18 years
-        216,  # 18+
-    ]
+    age_bins = np.linspace(0, 7000, 7001)
 
     bins = 5000
     bin_range = (0, 5)
 
     _, edges = np.histogram([], bins=bins, range=bin_range)
-    hists_day = {
-        age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins_day
-    }
-    hists_month = {
-        age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins_month
+    hists = {
+        "naive": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+        "bm": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+        "bm_st1": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+        "bm_st1_st2": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
     }
 
     for i, w in enumerate(itr):
@@ -70,17 +62,10 @@ def save_pats(sdk, dev, itr, early_stop=None):
             info = sdk.get_patient_info(w.patient_id)
             t = datetime.fromtimestamp(w.start_time / 10**9)
             dob = datetime.fromtimestamp(info["dob"] / 10**9)
-            age_at_visit = t.year - dob.year
-
-            # if not (t < datetime(2022, 1, 1).year and age_at_visit == 10):
-            #         print(f"Skipping patient dev {dev}, date: {t}, age: {age_at_visit}")
-            #         continue
-            # if t >= datetime(year=2022, month=6, day=1):
-            #     print(f"Skipping post 2022: {t}")
-            # continue
+            age_at_visit = (t - dob).days
 
         print(
-            f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit}"
+            f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit} days"
         )
 
         # Extract data from window and validate
@@ -122,8 +107,8 @@ def save_pats(sdk, dev, itr, early_stop=None):
 
             ssize = 6
             matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
-            # print(f"Matched beats: {len(matching_beats)}")
             assert len(matching_beats) > 0, "BM failed to find any matching beats"
+
             log.log_status(WindowStatus.TOTAL_BEATS, len(ecg_peak_times))
             log.log_status(
                 WindowStatus.TOTAL_BEATS_DROPPED,
@@ -139,21 +124,58 @@ def save_pats(sdk, dev, itr, early_stop=None):
             all_pats["confidence"] = [m.confidence for m in matching_beats]
             all_pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
             all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
+            all_pats["age_days"] = all_pats["times"].apply(
+                lambda x: (datetime.fromtimestamp(x) - dob).days
+            )
 
             correct_pats(all_pats, matching_beats, pat_range=0.100)
             df = all_pats[all_pats["valid_correction"] > 0]
 
             fn = f"{w.patient_id}_{dev}_{i}"
-            corr, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"], fn)
+            cdata, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"], fn)
 
-            p1["p_id"] = np.full_like(p1["slope_ppm"], w.patient_id).astype(int)
-            p2["p_id"] = np.full_like(p2["slope_ppm"], w.patient_id).astype(int)
+            st1 = pd.DataFrame(cdata["st1"])
+            st2 = pd.DataFrame(cdata["st2"])
+
+            st1["age_days"] = st1["times"].apply(
+                lambda x: (datetime.fromtimestamp(x) - dob).days
+            )
+            st2["age_days"] = st2["times"].apply(
+                lambda x: (datetime.fromtimestamp(x) - dob).days
+            )
+
+            for day in all_pats["age_days"][all_pats["age_days"] <= 7000].unique():
+                naive = np.histogram(
+                    all_pats["1 beats"][all_pats["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["naive"][day] += naive
+
+                bm = np.histogram(
+                    df["corrected_bm_pat"][df["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["bm"][day] += bm
+
+                bm_st1 = np.histogram(
+                    st1["values"][st1["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["bm_st1"][day] += bm_st1
+
+                bm_st1_st2 = np.histogram(
+                    st2["values"][st2["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["bm_st1_st2"][day] += bm_st1_st2
 
             log.log_raw_data(p1, f"st1_params")
             log.log_raw_data(p2, f"st2_params")
-            # log.log_raw_data(
-            #     all_pats, f"{w.patient_id}_{date.month}_{date.year}_{age_at_visit}_pat"
-            # )
+
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -176,6 +198,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
         if early_stop and i >= early_stop:
             break
 
+    log.log_pickle(hists, "histograms")
     log.save_log()
 
     print(f"Finished processing device {dev}")
@@ -192,12 +215,13 @@ def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=N
         window_size,
         gap_tol,
         device=device,
-        prefetch=10,
+        prefetch=1,
+        cache=1,
         shuffle=False,
         start_nano=start_nano,
         end_nano=end_nano,
     )
-    save_pats(sdk, device, itr)
+    save_pats(sdk, device, itr, early_stop=1)
 
     return True
 
@@ -205,23 +229,24 @@ def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=N
 if __name__ == "__main__":
 
     # Newest dataset
-    local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
+    # local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
+    local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
 
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 1 * 60 * 60  # 10 hr
-    gap_tol = 5 * 60  # 30 min to reduce overlapping windows with gap tol
+    window_size = 1 * 60 * 60
+    gap_tol = 5 * 60
 
     # start = None
     start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
     # end = datetime(year=2022, month=6, day=1).timestamp() * (10**9)
     end = None
 
-    # run(local_dataset, window_size, gap_tol, 80, start, end)
-    # exit()
+    run(local_dataset, window_size, gap_tol, 80, start, end)
+    exit()
 
     # itr = make_device_itr_ecg_ppg(
     #     sdk, window_size, gap_tol, device=80, prefetch=1, shuffle=True

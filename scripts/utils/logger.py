@@ -128,6 +128,15 @@ class Logger:
         if len(self.results) > self.log_rate:
             self._save_current_res()
 
+    def log_pickle(self, data, filename):
+        """
+        Log pickle file of histograms
+        """
+        df = pd.DataFrame(data)
+
+        fn = os.path.join(self.path, f"device_{self.dev}_{filename}.pkl")
+        df.to_pickle(fn)
+
     def log_raw_data(self, data, filename):
         """
         Log raw data for a window

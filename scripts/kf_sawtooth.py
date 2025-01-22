@@ -120,11 +120,11 @@ def kf(x, y, thresh=0.02, slope=0.04 / 60, fail_count=2):
 
 def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
 
-    med = np.median(pats)
-    cut = np.where(abs(pats - med) < 0.02)
+    # med = np.median(pats)
+    # cut = np.where(abs(pats - med) < 0.02)
 
-    x = times.values[cut]
-    y = pats.values[cut]
+    x = times.values  # [cut]
+    y = pats.values  # [cut]
 
     if plot:
         fig, ax = plt.subplots()
@@ -143,8 +143,10 @@ def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
         "points": [],
     }
 
-    new_data = []
-    corrected = []
+    data = {
+        "st1": {"times": [], "values": []},
+        "st2": {"times": [], "values": []},
+    }
 
     for i, k in kfs.items():
 
@@ -162,10 +164,11 @@ def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
             params_st1["period"].append(period)
             params_st1["points"].append(len(k["times"]))
 
-        # fixed = k["meas"] - k["preds"] + offset
         fixed = k["meas"] - k["preds"] + k["preds"][0]
-        for z in fixed:
-            new_data.append(z)
+
+        for i, z in enumerate(fixed):
+            data["st1"]["values"].append(z)
+            data["st1"]["times"].append(k["times"][i])
 
         if plot:
             ax.scatter(
@@ -186,7 +189,7 @@ def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
                 alpha=0.8,
             )
 
-    kfs2 = kf(x, new_data, 0.011, 0.02 / 160, 5)
+    kfs2 = kf(x, data["st1"]["values"], 0.011, 0.02 / 160, 5)
 
     for i, k in kfs2.items():
         if len(k["times"]) < 10:
@@ -216,8 +219,9 @@ def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
 
         fixed = k["meas"] - k["preds"] + k["preds"][0]
 
-        for z in fixed:
-            corrected.append(z)
+        for i, z in enumerate(fixed):
+            data["st2"]["values"].append(z)
+            data["st2"]["times"].append(k["times"][i])
 
     if plot:
         plt.legend(
@@ -230,9 +234,13 @@ def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
             loc="upper right",
         )
         plt.tight_layout()
-        if fn:
-            plt.savefig(f"../data/st_plots_post/{fn}.png")
-        # plt.show()
+        # if fn:
+        # plt.savefig(f"../data/st_plots_post/{fn}.png")
+        plt.show()
         plt.close()
 
-    return corrected, params_st1, params_st2
+    return (
+        data,
+        params_st1,
+        params_st2,
+    )

@@ -7,7 +7,11 @@ import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
 from kf_sawtooth import calc_sawtooth
-from utils.atriumdb_helpers import make_device_itr_all_signals, make_device_itr_ecg_ppg
+from utils.atriumdb_helpers import (
+    make_device_itr_all_signals,
+    make_device_itr_ecg_ppg,
+    print_all_measures,
+)
 from utils.logger import Logger, WindowStatus
 from visualization.beat_matching import (
     beat_matching,
@@ -28,8 +32,13 @@ def save_pats(sdk, dev, itr, early_stop=None):
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    num_windows = early_stop if early_stop else itr._length
-    log = Logger(dev, num_windows, path="../data/result_histograms/", verbose=True)
+    num_windows = early_stop if early_stop else len(itr)
+    log = Logger(
+        dev,
+        num_windows,
+        path="/home/iruffolo/dev/bp-estimation/data/result_histograms/",
+        verbose=True,
+    )
 
     age_bins = np.linspace(0, 7000, 7001)
 
@@ -204,7 +213,15 @@ def save_pats(sdk, dev, itr, early_stop=None):
     print(f"Finished processing device {dev}")
 
 
-def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=None):
+def run(
+    local_dataset,
+    window_size,
+    gap_tol,
+    device,
+    start_nano=None,
+    end_nano=None,
+    early_stop=None,
+):
     """
     Function to run in parallel
     """
@@ -215,13 +232,13 @@ def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=N
         window_size,
         gap_tol,
         device=device,
-        prefetch=1,
-        cache=1,
+        prefetch=10,
+        cache=10,
         shuffle=False,
         start_nano=start_nano,
         end_nano=end_nano,
     )
-    save_pats(sdk, device, itr, early_stop=1)
+    save_pats(sdk, device, itr, early_stop=early_stop)
 
     return True
 
@@ -229,10 +246,11 @@ def run(local_dataset, window_size, gap_tol, device, start_nano=None, end_nano=N
 if __name__ == "__main__":
 
     # Newest dataset
-    # local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
-    local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
+    # local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
+    local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
+    # print_all_measures(sdk)
 
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
@@ -240,26 +258,23 @@ if __name__ == "__main__":
     window_size = 1 * 60 * 60
     gap_tol = 5 * 60
 
-    # start = None
-    start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
-    # end = datetime(year=2022, month=6, day=1).timestamp() * (10**9)
-    end = None
+    start = None
+    end = datetime(year=2022, month=5, day=1).timestamp() * (10**9)
 
-    run(local_dataset, window_size, gap_tol, 80, start, end)
-    exit()
-
-    # itr = make_device_itr_ecg_ppg(
-    #     sdk, window_size, gap_tol, device=80, prefetch=1, shuffle=True
-    # )
-    # save_pats(sdk, 85, itr, early_stop=50000)
+    early_stop = None
+    # start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
+    # end = None
+    # run(local_dataset, window_size, gap_tol, 80, start, end)
     # exit()
 
-    num_cores = 15  # len(devices)
+    num_cores = 15
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {
-            pp.submit(run, local_dataset, window_size, gap_tol, d, start, end): d
+            pp.submit(
+                run, local_dataset, window_size, gap_tol, d, start, end, early_stop
+            ): d
             for d in devices
         }
 

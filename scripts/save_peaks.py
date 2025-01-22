@@ -6,7 +6,6 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
-
 from pat import peak_detect, rpeak_detect_fast
 from utils.atriumdb_helpers import make_device_itr_all_signals, make_device_itr_ecg_ppg
 from utils.logger import Logger, WindowStatus
@@ -23,7 +22,7 @@ def save_peaks(sdk, dev, itr, early_stop=None):
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    num_windows = early_stop if early_stop else itr._length
+    num_windows = early_stop if early_stop else len(itr)
     log = Logger(dev, num_windows, path="../data/andrew_peaks/", verbose=True)
 
     count = 0

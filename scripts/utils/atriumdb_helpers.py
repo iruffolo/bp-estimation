@@ -339,6 +339,7 @@ def make_device_itr_ecg_ppg(
         cached_windows_per_source=cache,
         time_units="s",
         shuffle=shuffle,
+        iterator_type="lightmapped",
     )
 
     return itr

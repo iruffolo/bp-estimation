@@ -75,7 +75,7 @@ if __name__ == "__main__":
         shuffel=False,
     )
 
-    print(itr._length)
+    print(len(itr))
 
     pat = []
 

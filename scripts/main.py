@@ -7,16 +7,15 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
-from numpy.polynomial import Polynomial
-from scipy.stats import pearsonr, spearmanr
-from sklearn import linear_model
-
 from correlation import create_aligned_data
 from data_quality import DataValidator
+from numpy.polynomial import Polynomial
 from pat import calclulate_pat
 from plotting.slopes import plot_slopes
 from plotting.waveforms import plot_waveforms
 from sawtooth import fit_sawtooth
+from scipy.stats import pearsonr, spearmanr
+from sklearn import linear_model
 from utils.atriumdb_helpers import (
     make_device_itr,
     make_device_itr_all_signals,
@@ -36,7 +35,7 @@ def process_pat(sdk, dev, itr, early_stop=None):
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    num_windows = early_stop if early_stop else itr._length
+    num_windows = early_stop if early_stop else len(itr)
     log = Logger(dev, num_windows, path="../data/andrew/", verbose=True)
 
     for i, w in enumerate(itr):

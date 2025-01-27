@@ -4,7 +4,6 @@ import warnings
 from datetime import datetime
 
 import matplotlib.pyplot as plt
-
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
@@ -30,7 +29,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
     :return: Dictionary of pulse arrival times for each patient in device
     """
 
-    num_windows = early_stop if early_stop else itr._length
+    num_windows = early_stop if early_stop else len(itr)
     log = Logger(dev, num_windows, path="../data/st_correction_post/", verbose=True)
 
     for i, w in enumerate(itr):
@@ -71,8 +70,7 @@ def save_pats(sdk, dev, itr, early_stop=None):
                 )
                 ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
-
-            fig, ax = plt.subplots(1,3)
+            fig, ax = plt.subplots(1, 3)
 
             csum = np.cumsum(np.diff(ppg_peak_times))
             print(csum)
@@ -85,14 +83,13 @@ def save_pats(sdk, dev, itr, early_stop=None):
             y = csum - poly1d(x)
 
             ax[0].plot(ppg_peak_times[:-1], np.diff(ppg_peak_times))
-            ax[1].scatter(x, csum, s=0.5, marker='x')
+            ax[1].scatter(x, csum, s=0.5, marker="x")
             ax[1].plot(x, poly1d(x))
             ax[1].set_title("cumsum")
             ax[2].scatter(x, y, s=0.5)
             ax[2].set_title("detrended cumsum")
 
             plt.show()
-
 
         # Peak detection faliled to detect enough peaks in calculate_pat
         except AssertionError as e:

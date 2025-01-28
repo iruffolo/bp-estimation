@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import cm
 
 # Bins defined for grouping histograms
 age_bins = [
@@ -87,93 +88,7 @@ def combine(path):
         np.save(path + key, combined[key])
 
 
-if __name__ == "__main__":
-
-    print("Processing results")
-
-    path = "../../data/result_histograms_prod/"
-    files = os.listdir(path)
-
-    names = ["naive", "bm", "bm_st1", "bm_st1_st2"]
-
-    # Define hist edges for plotting
-    _, edges = np.histogram([], bins=5000, range=(0, 5))
-
-    cols = [n for n in names]
-    cols += ["bm_st1_st2_offset"]
-    stats = {c: {"avg": [], "median": [], "std": []} for c in cols}
-    stats["title"] = []
-
-    offset = 1.31
-
-    for n in names:
-        print(f"Processing {n}")
-        df = np.load(path + n + ".npy")
-
-        for i in range(len(age_bins) - 1):
-
-            hist = df[age_bins[i] : age_bins[i + 1]]
-
-            title = f"Age {age_bins[i]}:{age_bins[i+1]} days"
-            if np.sum(hist) == 0:
-                print(f"No data for {title}")
-                continue
-
-            hist = np.sum(hist, axis=0)
-
-            # Normalize for plot
-            n_hist = hist / np.sum(hist)
-            mcumsum = np.cumsum(n_hist)
-            idx = np.where(mcumsum < 0.5)[0][-1]
-
-            avg, std = calc_hist_stats(hist.flatten(), edges)
-
-            stats[n]["avg"].append(avg)
-            stats[n]["std"].append(std)
-            stats[n]["median"].append(idx / 1000)
-
-            if n == "bm_st1_st2":
-                stats["bm_st1_st2_offset"]["avg"].append(avg - offset)
-                stats["bm_st1_st2_offset"]["std"].append(std)
-                stats["bm_st1_st2_offset"]["median"].append(idx / 1000 - offset)
-
-            if n == "naive":
-                stats["title"].append(title)
-
-            continue
-
-            fig, ax = plt.subplots(1, 2)
-            # ax[0].bar(
-            #     edges[:-1], hist, width=np.diff(edges), align="edge", edgecolor="black"
-            # )
-            ax[0].step(
-                edges,
-                np.append(hist, 0),
-                where="post",
-                linewidth=2,
-                label=title,
-            )
-
-            cumsum = np.cumsum(hist)
-            cumsum = cumsum / cumsum[-1]
-            ax[1].plot(edges[:-1], cumsum, label=title)
-
-            ax[0].minorticks_on()
-            ax[0].yaxis.set_tick_params(which="minor", bottom=False)
-            ax[1].minorticks_on()
-            ax[1].yaxis.set_tick_params(which="minor", bottom=False)
-
-            plt.xlabel("PAT")
-            plt.xlim([0.5, 2])
-            plt.ylabel("Probability")
-            plt.grid(color="0.9")
-            plt.legend(loc="upper right")
-            plt.tight_layout()
-            plt.savefig(f"result_hists/{n}/{age_bins[i]}.png")
-            plt.savefig(f"result_hists/{n}/{age_bins[i]}.svg", format="svg")
-            # plt.show()
-            plt.close()
-
+def plot_stats(stats, names):
     fig, ax = plt.subplots(5, 2, figsize=(10, 10))
 
     x1 = age_bins[3:30]
@@ -195,10 +110,6 @@ if __name__ == "__main__":
         poly1d = np.poly1d(poly)
         ax[i][0].plot(x1, poly1d(x1), color="green")
 
-        # poly = np.polyfit(x1, df["median"][0:27], 1)
-        # poly1d = np.poly1d(poly)
-        # ax[i][0].plot(x1, poly1d(x1), color="red")
-
         ax[i][0].set_ylabel("PAT (s)")
 
         ax[i][1].scatter(x2, df["avg"][27:], label="avg", s=size)
@@ -209,10 +120,6 @@ if __name__ == "__main__":
         poly1d = np.poly1d(poly)
         ax[i][1].plot(x2, poly1d(x2), color="green")
 
-        # poly = np.polyfit(x2, df["median"][27:], 1)
-        # poly1d = np.poly1d(poly)
-        # ax[i][1].plot(x2, poly1d(x2), color="red")
-
         ax[i][1].set_xlim((20, x2[-1] + 10))
 
         # ax[i][0].set_ylim((0, 2))
@@ -222,8 +129,6 @@ if __name__ == "__main__":
 
         ax[i][0].grid()
         ax[i][1].grid()
-
-        # ax[i][1].set_yticks([])
 
     ax[0][0].set_title(f"Naive")
     ax[1][0].set_title(f"Beatmatching Only")
@@ -236,3 +141,154 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("pat_by_age.svg", format="svg")
     plt.show()
+
+    # print stats
+    for n in names:
+        df = stats[n]
+        print(
+            f"Overall {n}: \n"
+            f"avg: {np.mean(df["avg"])} \n"
+            f"std: {np.mean(df["std"])}"
+        )
+
+
+def plot_all_dist(ax, hist, edges, title):
+
+    ax[0].step(
+        edges,
+        np.append(hist, 0),
+        where="post",
+        linewidth=2,
+        label=title,
+    )
+
+    cumsum = np.cumsum(hist)
+    cumsum = cumsum / cumsum[-1]
+
+    ax[1].plot(edges[:-1], cumsum, label=title)
+
+    ax[0].minorticks_on()
+    ax[0].yaxis.set_tick_params(which="minor")
+    ax[0].grid()
+    # ax[0].legend(loc="upper right")
+
+    ax[1].minorticks_on()
+    ax[1].yaxis.set_tick_params(which="minor")
+    ax[1].grid()
+    # ax[1].legend(loc="upper right")
+
+
+def plot_dist(hist, edges, save=True, show=False, path=""):
+
+    fig, ax = plt.subplots(1, 2)
+
+    # ax[0].bar(
+    #     edges[:-1], hist, width=np.diff(edges), align="edge", edgecolor="black"
+    # )
+    ax[0].step(
+        edges,
+        np.append(hist, 0),
+        where="post",
+        linewidth=2,
+        label=title,
+    )
+
+    cumsum = np.cumsum(hist)
+    cumsum = cumsum / cumsum[-1]
+    ax[1].plot(edges[:-1], cumsum, label=title)
+
+    ax[0].minorticks_on()
+    ax[0].yaxis.set_tick_params(which="minor", bottom=False)
+    ax[1].minorticks_on()
+    ax[1].yaxis.set_tick_params(which="minor", bottom=False)
+
+    plt.xlabel("PAT")
+    plt.xlim([0.5, 2])
+    plt.ylabel("Probability")
+    plt.grid(color="0.9")
+    plt.legend(loc="upper right")
+    plt.tight_layout()
+
+    if save:
+        plt.savefig(f"{path}.png")
+        plt.savefig(f"{path}.svg", format="svg")
+    if show:
+        plt.show()
+
+    plt.close()
+
+
+if __name__ == "__main__":
+
+    print("Processing results")
+
+    path = "../../data/result_histograms_prod/"
+    files = os.listdir(path)
+
+    names = ["naive", "bm", "bm_st1", "bm_st1_st2"]
+
+    # Define hist edges for plotting
+    _, edges = np.histogram([], bins=5000, range=(0, 5))
+
+    cols = [n for n in names]
+    cols += ["bm_st1_st2_offset"]
+    stats = {c: {"avg": [], "median": [], "std": []} for c in cols}
+    stats["title"] = []
+
+    offset = 1.31
+
+    num_colors = len(age_bins)
+    colors = [cm.Greens(i / num_colors) for i in range(num_colors)]
+    plt.rcParams["axes.prop_cycle"] = plt.cycler(color=colors)
+    fig, ax = plt.subplots(4, 2, figsize=(10, 10))
+
+    for j, n in enumerate(names):
+        print(f"Processing {n}")
+        df = np.load(path + n + ".npy")
+
+        for i in range(len(age_bins) - 1):
+
+            hist = df[age_bins[i] : age_bins[i + 1]]
+
+            title = f"Age {age_bins[i]}:{age_bins[i+1]} days"
+            if np.sum(hist) == 0:
+                print(f"No data for {title}")
+                continue
+
+            hist = np.sum(hist, axis=0)
+
+            if n == "naive":
+                stats["title"].append(title)
+            else:
+                hist[: int(offset * 1000)] = 0
+                hist[2000:] = 0
+
+            avg, std = calc_hist_stats(hist.flatten(), edges)
+
+            # Normalize and find median
+            n_hist = hist / np.sum(hist)
+            mcumsum = np.cumsum(n_hist)
+            median = np.where(mcumsum < 0.5)[0][-1]
+
+            stats[n]["avg"].append(avg)
+            stats[n]["std"].append(std)
+            stats[n]["median"].append(median / 1000)
+
+            if n == "bm_st1_st2":
+                stats["bm_st1_st2_offset"]["avg"].append(avg - offset)
+                stats["bm_st1_st2_offset"]["std"].append(std)
+                stats["bm_st1_st2_offset"]["median"].append(median / 1000 - offset)
+
+            # plot_dist(hist, edges, True, False, f"result_hists_clean/{n}/{age_bins[i]}")
+            plot_all_dist(ax[j], n_hist, edges, title)
+
+    for a in ax[1:]:
+        a[0].sharex(a[0])
+        a[1].sharex(a[1])
+
+    plt.suptitle("PAT Distributions by age")
+    plt.tight_layout()
+    plt.savefig("all_dist_by_age.svg", format="svg")
+    plt.show()
+
+    # plot_stats(stats, names)

@@ -50,8 +50,7 @@ def plot_dists(df, name, bins=1000, r1=None, r2=None):
 
 if __name__ == "__main__":
 
-    path = "/home/iruffolo/dev/bp-estimation/data/st_correction/"
-    path = "/home/iruffolo/dev/bp-estimation/data/st_correction_post/"
+    path = "/home/ian/dev/bp-estimation/data/result_histograms_prod/sawtooth/"
 
     files = os.listdir(path)
 
@@ -81,14 +80,15 @@ if __name__ == "__main__":
 
     # Drop fits with low number of points
     st1 = st1[st1["points"] > 50]
-    st2 = st2[(st2["points"] > 100) & (st2["points"] < 400) & (st2["slope_ppm"] > 0)]
+    # st2 = st2[(st2["points"] > 100) & (st2["points"] < 400) & (st2["slope_ppm"] > 0)]
+    st2 = st2[st2["points"] > 100]
 
-    patients = st2["p_id"].unique()
+    # patients = st2["p_id"].unique()
 
-    plot_dists(st1, "sawtooth1_post", r1=(0, 1000), r2=(0, 250))
-    plot_dists(st2, "sawtooth2_post", r1=(-200, 600), r2=(0, 1000))
-    plot_scatter(st2, "st2_scatter_post", r1=(0, 300), r2=(0, 300))
-    plot_scatter(st1, "st1_scatter_post", r1=(0, 1000), r2=(0, 250))
+    plot_dists(st1, "sawtooth1", r1=(0, 1000), r2=(0, 250))
+    plot_dists(st2, "sawtooth2", r1=(-200, 600), r2=(0, 1000))
+    plot_scatter(st1, "st1_scatter", r1=(0, 1000), r2=(0, 250))
+    plot_scatter(st2, "st2_scatter", r1=(0, 300), r2=(0, 300))
 
     # print("Plotting individual patients")
     # for p in patients:

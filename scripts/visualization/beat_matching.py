@@ -9,10 +9,9 @@ import pandas as pd
 from atriumdb import AtriumSDK
 from biosppy.signals import abp, ecg
 from biosppy.signals.ppg import find_onsets_kavsaoglu2016
+from plotting.pat import plot_pat, plot_pat_hist
 from scipy.linalg import norm
 from scipy.spatial import distance
-
-from plotting.pat import plot_pat, plot_pat_hist
 
 
 def peak_detect(signal_times, signal_values, freq_hz):
@@ -52,7 +51,9 @@ def rpeak_detect_fast(signal_times, signal_values, freq_hz):
 
     try:
         clean_signal = nk.ecg_clean(signal_values, sampling_rate=int(freq_hz))
-        signals, info = nk.ecg_peaks(clean_signal, sampling_rate=int(freq_hz))
+        signals, info = nk.ecg_peaks(
+            clean_signal, sampling_rate=int(freq_hz), mindelay=0.24
+        )
 
         peak_indices = info["ECG_R_Peaks"]
 

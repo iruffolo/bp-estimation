@@ -186,16 +186,12 @@ def plot_dist(hist, edges, save=True, show=False, path=""):
     #     edges[:-1], hist, width=np.diff(edges), align="edge", edgecolor="black"
     # )
     ax[0].step(
-        edges,
-        np.append(hist, 0),
-        where="post",
-        linewidth=2,
-        label=title,
+        edges, np.append(hist, 0), where="post", linewidth=2, label=title, color="Green"
     )
 
     cumsum = np.cumsum(hist)
     cumsum = cumsum / cumsum[-1]
-    ax[1].plot(edges[:-1], cumsum, label=title)
+    ax[1].plot(edges[:-1], cumsum, label=title, color="Green")
 
     ax[0].minorticks_on()
     ax[0].yaxis.set_tick_params(which="minor", bottom=False)
@@ -222,10 +218,12 @@ if __name__ == "__main__":
 
     print("Processing results")
 
-    path = "../../data/result_histograms_prod/"
+    path = "../../data/result_histograms_pre_2022_fixed_bpm/"
     files = os.listdir(path)
 
     names = ["naive", "bm", "bm_st1", "bm_st1_st2"]
+
+    # combine(path)
 
     # Define hist edges for plotting
     _, edges = np.histogram([], bins=5000, range=(0, 5))
@@ -240,7 +238,7 @@ if __name__ == "__main__":
     num_colors = len(age_bins)
     colors = [cm.Greens(i / num_colors) for i in range(num_colors)]
     plt.rcParams["axes.prop_cycle"] = plt.cycler(color=colors)
-    fig, ax = plt.subplots(4, 2, figsize=(10, 10))
+    # fig, ax = plt.subplots(4, 2, figsize=(10, 10))
 
     for j, n in enumerate(names):
         print(f"Processing {n}")
@@ -259,9 +257,9 @@ if __name__ == "__main__":
 
             if n == "naive":
                 stats["title"].append(title)
-            else:
-                hist[: int(offset * 1000)] = 0
-                hist[2000:] = 0
+            # else:
+            # hist[: int(offset * 1000)] = 0
+            # hist[2000:] = 0
 
             avg, std = calc_hist_stats(hist.flatten(), edges)
 
@@ -279,16 +277,17 @@ if __name__ == "__main__":
                 stats["bm_st1_st2_offset"]["std"].append(std)
                 stats["bm_st1_st2_offset"]["median"].append(median / 1000 - offset)
 
-            # plot_dist(hist, edges, True, False, f"result_hists_clean/{n}/{age_bins[i]}")
-            plot_all_dist(ax[j], n_hist, edges, title)
+            plot_dist(
+                hist, edges, True, False, f"result_hists_clean_fixed/{n}/{age_bins[i]}"
+            )
+            # plot_all_dist(ax[j], n_hist, edges, title)
 
-    for a in ax[1:]:
-        a[0].sharex(a[0])
-        a[1].sharex(a[1])
-
-    plt.suptitle("PAT Distributions by age")
-    plt.tight_layout()
-    plt.savefig("all_dist_by_age.svg", format="svg")
-    plt.show()
+    # for a in ax[1:]:
+    #     a[0].sharex(a[0])
+    #     a[1].sharex(a[1])
+    # plt.suptitle("PAT Distributions by age")
+    # plt.tight_layout()
+    # plt.savefig("all_dist_by_age_fixed_bpm.svg", format="svg")
+    # plt.show()
 
     # plot_stats(stats, names)

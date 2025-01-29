@@ -329,7 +329,21 @@ def make_device_itr_ecg_ppg(
     }
 
     definition = DatasetDefinition(measures=measures, device_ids=device_ids)
+    sdk.load_definition(definition)
 
+    itr = sdk.get_iterator(
+        definition,
+        window_duration=window_size,
+        window_slide=window_size,
+        gap_tolerance=gap_tol,
+        num_windows_prefetch=prefetch,
+        cached_windows_per_source=cache,
+        time_units="s",
+        shuffle=shuffle,
+        iterator_type="lightmapped",
+    )
+
+    return itr
     itr = sdk.get_iterator(
         definition,
         window_duration=window_size,

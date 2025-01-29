@@ -188,6 +188,7 @@ def plot_dist(hist, edges, save=True, show=False, path=""):
     ax[0].step(
         edges, np.append(hist, 0), where="post", linewidth=2, label=title, color="Green"
     )
+    ax[0].set_xlim([0.5, 2])
 
     cumsum = np.cumsum(hist)
     cumsum = cumsum / cumsum[-1]
@@ -278,7 +279,11 @@ if __name__ == "__main__":
                 stats["bm_st1_st2_offset"]["median"].append(median / 1000 - offset)
 
             plot_dist(
-                hist, edges, True, False, f"result_hists_clean_fixed/{n}/{age_bins[i]}"
+                hist,
+                edges,
+                True,
+                False,
+                f"../../data/results/result_hists_clean_fixed/{n}/{age_bins[i]}",
             )
             # plot_all_dist(ax[j], n_hist, edges, title)
 

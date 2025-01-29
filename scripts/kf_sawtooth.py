@@ -240,7 +240,8 @@ def calc_sawtooth(times, pats, fn=None, plot=False, path=None):
         plt.close()
 
     return (
-        data,
+        pd.DataFrame(data["st1"]),
+        pd.DataFrame(data["st2"]),
         params_st1,
         params_st2,
     )

@@ -1,30 +1,22 @@
 import concurrent.futures
 import os
+import warnings
 from datetime import datetime
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from atriumdb import AtriumSDK, DatasetDefinition
-from correlation import create_aligned_data
-from data_quality import DataValidator
-from numpy.polynomial import Polynomial
-from pat import calclulate_pat
-from plotting.slopes import plot_slopes
-from plotting.waveforms import plot_waveforms
-from sawtooth import fit_sawtooth
-from scipy.stats import pearsonr, spearmanr
-from sklearn import linear_model
+from beat_matching import beat_matching, correct_pats, peak_detect, rpeak_detect_fast
+from kf_sawtooth import calc_sawtooth
 from utils.atriumdb_helpers import (
-    make_device_itr,
     make_device_itr_all_signals,
+    make_device_itr_ecg_ppg,
     print_all_measures,
 )
 from utils.logger import Logger, WindowStatus
 
 
-def process_pat(sdk, dev, itr, early_stop=None):
+def save_pats(sdk, dev, itr, early_stop=None):
     """
     Processing function for dataset iterator
 
@@ -36,13 +28,49 @@ def process_pat(sdk, dev, itr, early_stop=None):
     """
 
     num_windows = early_stop if early_stop else len(itr)
-    log = Logger(dev, num_windows, path="../data/andrew/", verbose=True)
+    log = Logger(
+        dev,
+        num_windows,
+        path="/home/iruffolo/dev/bp-estimation/data/result_histograms/",
+        verbose=True,
+    )
+
+    age_bins = np.linspace(0, 7000, 7001)
+
+    bins = 5000
+    bin_range = (0, 5)
+
+    _, edges = np.histogram([], bins=bins, range=bin_range)
+    hists = {
+        "naive": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+        "bm": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+        "bm_st1": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+        "bm_st1_st2": {
+            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
+        },
+    }
 
     for i, w in enumerate(itr):
 
         if not w.patient_id:
             log.log_status(WindowStatus.NO_PATIENT_ID)
             continue
+        else:
+            # Check patient age
+            info = sdk.get_patient_info(w.patient_id)
+            t = datetime.fromtimestamp(w.start_time / 10**9)
+            dob = datetime.fromtimestamp(info["dob"] / 10**9)
+            age_at_visit = (t - dob).days
+
+        print(
+            f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit} days"
+        )
 
         # Extract data from window and validate
         for (signal, freq, _), v in w.signals.items():
@@ -55,147 +83,103 @@ def process_pat(sdk, dev, itr, early_stop=None):
 
             # Extract specific signals
             match signal:
-                case signal if "BEAT_RATE" in signal:
-                    hr = v
-                case signal if "SYS" in signal:
-                    sbp = v
                 case signal if "ECG_ELEC" in signal:
                     ecg, ecg_freq = v, freq
                 case signal if "PULS_OXIM" in signal:
                     ppg, ppg_freq = v, freq
-                case "MDC_PRESS_BLD_ART" | "MDC_PRESS_BLD_ART_ABP":
-                    abp, abp_freq = v, freq
                 case _:
                     pass
 
         # Ensure window data is valid (gap tol can create bad windows)
-        if v["expected_count"] * 0.5 > v["actual_count"]:
+        if v["expected_count"] * 0.05 > v["actual_count"]:
+            print(f"Incomplete window {v['actual_count']}")
             log.log_status(WindowStatus.INCOMPLETE_WINDOW)
             continue
 
-        # Filter out by date less than 2023-01-01
-        # if ecg["times"][0] > 1640998861:
-        #     print(f"Date filter {datetime.fromtimestamp(ecg['times'][0])}")
-        #     continue
-
         try:
-            pats, naive_pats, n_corrected, ecg_times, ppg_times = calclulate_pat(
-                ecg, ecg_freq, ppg, ppg_freq
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                ecg_peak_times = rpeak_detect_fast(
+                    ecg["times"], ecg["values"], ecg_freq
+                )
+                ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
+
+            date = datetime.fromtimestamp(ecg["times"][0])
+
+            assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
+            assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
+
+            ssize = 6
+            matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
+            assert len(matching_beats) > 0, "BM failed to find any matching beats"
+
+            log.log_status(WindowStatus.TOTAL_BEATS, len(ecg_peak_times))
+            log.log_status(
+                WindowStatus.TOTAL_BEATS_DROPPED,
+                len(ecg_peak_times) - len(matching_beats),
             )
 
-            # Window has very sparse measurements, poor quality
-            if pats["times"].size < 500:
-                log.log_status(WindowStatus.INSUFFICIENT_PATS)
-                continue
-
-            # if np.median(pats["values"]) < 0.5 or np.median(pats["values"]) > 2:
-            #     print(pats)
-            #     print(naive_pats)
-            #     print(f"pats: {len(pats)}")
-            #     print(f"naive_pats: {len(naive_pats)}")
-            #     print(f"matching_peaks: {len(matching_peaks)}")
-            #     print(f"ecg_peak_times: {len(ecg_peak_times)}")
-            #     print(f"ppg_peak_times: {len(ppg_peak_times)}")
-            #     # # Debug plot
-            #     plot_waveforms(ecg, ppg, abp, show=True)
-            #     exit()
-
-            # Get Sawtooth and correct PATs
-            st, params = fit_sawtooth(pats["times"], pats["values"], plot=False)
-            corrected_pat = pats["values"] - st + params[2]
-
-            # Align pats with SBP values
-            synced = create_aligned_data(
-                corrected_pat, naive_pats["values"], pats["times"], sbp
+            # Create a df for all possible PAT values
+            all_pats = pd.DataFrame(
+                [m.possible_pats for m in matching_beats],
+                columns=[f"{i + 1} beats" for i in range(ssize)],
+            )
+            all_pats["bm_pat"] = [m.possible_pats[m.n_peaks] for m in matching_beats]
+            all_pats["confidence"] = [m.confidence for m in matching_beats]
+            all_pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
+            all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
+            all_pats["age_days"] = all_pats["times"].apply(
+                lambda x: (datetime.fromtimestamp(x) - dob).days
             )
 
-            if synced["times"].size < 300:
-                log.log_status(WindowStatus.FAILED_BP_ALIGNMENT)
-                continue
+            correct_pats(all_pats, matching_beats, pat_range=0.100)
+            df = all_pats[all_pats["valid_correction"] > 0]
 
-            # Get Correlation with SBP
-            s1 = spearmanr(synced["pats"], synced["bp"])
-            s2 = spearmanr(synced["naive_pats"], synced["bp"])
+            fn = f"{w.patient_id}_{dev}_{i}"
+            cdata, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"], fn)
 
-            # Calculate medians for better line of best fit
-            # median = (
-            #     pd.DataFrame(synced)
-            #     .groupby("bp")
-            #     .agg({"pats": ["median", "count"], "naive_pats": ["median", "count"]})
-            #     .reset_index()
-            # )
+            st1 = pd.DataFrame(cdata["st1"])
+            st2 = pd.DataFrame(cdata["st2"])
 
-            # Filter by minimum number of PAT points per BP value
-            # f1 = median[["pats", "bp"]][median["pats"]["count"] > 20]
-            # f2 = median[["naive_pats", "bp"]][median["naive_pats"]["count"] > 20]
+            st1["age_days"] = st1["times"].apply(
+                lambda x: (datetime.fromtimestamp(x) - dob).days
+            )
+            st2["age_days"] = st2["times"].apply(
+                lambda x: (datetime.fromtimestamp(x) - dob).days
+            )
 
-            # s1 = spearmanr(f1["pats"]["median"], f1["bp"])
-            # s2 = spearmanr(f2["naive_pats"]["median"], f2["bp"])
+            for day in all_pats["age_days"][all_pats["age_days"] <= 7000].unique():
+                naive = np.histogram(
+                    all_pats["1 beats"][all_pats["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["naive"][day] += naive
 
-            # Fit lines of best fit
-            # l1 = Polynomial.fit(f1["pats"]["median"], f1["bp"], 1, full=True)
-            # l2 = Polynomial.fit(f2["naive_pats"]["median"], f2["bp"], 1, full=True)
+                bm = np.histogram(
+                    df["corrected_bm_pat"][df["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["bm"][day] += bm
 
-            # Debug plot
-            # plot_slopes(synced, f1, f2, l1[0], l2[0])
+                bm_st1 = np.histogram(
+                    st1["values"][st1["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["bm_st1"][day] += bm_st1
 
-            log.log_data(
-                w.patient_id,
-                sdk.get_patient_info(w.patient_id)["dob"],
-                ecg["times"][0],
-                n_corrected,
-                s1,
-                s2,
-                hr,
-                synced,
-            )
-            log.log_raw_data(
-                {
-                    "patient_id": np.full_like(pats["times"], w.patient_id),
-                    "ecg_peaks": pats["times"],
-                    "pat": pats["values"],
-                    "corrected_pat": corrected_pat,
-                },
-                f"pats",
-            )
-            log.log_raw_data(
-                {
-                    "patient_id": np.full_like(naive_pats["times"], w.patient_id),
-                    "ecg_peaks": naive_pats["times"],
-                    "naive_pat": naive_pats["values"],
-                },
-                f"naive_pats",
-            )
-            log.log_raw_data(
-                {
-                    "patient_id": np.full_like(ecg_times, w.patient_id),
-                    "ecg_peaks": ecg_times,
-                },
-                f"ecg_peaks",
-            )
-            log.log_raw_data(
-                {
-                    "patient_id": np.full_like(ppg_times, w.patient_id),
-                    "ppg_peaks": ppg_times,
-                },
-                f"ppg_peaks",
-            )
-            log.log_raw_data(
-                {
-                    "patient_id": np.full_like(abp["times"], w.patient_id),
-                    "abp_time": abp["times"],
-                    "abp_value": abp["values"],
-                },
-                f"abp",
-            )
-            log.log_raw_data(
-                {
-                    "patient_id": np.full_like(sbp["times"], w.patient_id),
-                    "sbp_time": sbp["times"],
-                    "sbp_value": sbp["values"],
-                },
-                f"sbp",
-            )
+                bm_st1_st2 = np.histogram(
+                    st2["values"][st2["age_days"] == day],
+                    bins=bins,
+                    range=bin_range,
+                )[0]
+                hists["bm_st1_st2"][day] += bm_st1_st2
+
+            log.log_raw_data(p1, f"st1_params")
+            log.log_raw_data(p2, f"st2_params")
+
             log.log_status(WindowStatus.SUCCESS)
 
         # Peak detection faliled to detect enough peaks in calculate_pat
@@ -203,78 +187,90 @@ def process_pat(sdk, dev, itr, early_stop=None):
             print(f"Signal quality issue: {e}")
             if "ECG" in str(e):
                 log.log_status(WindowStatus.POOR_ECG_QUALITY)
-            if "PPG" in str(e):
+            elif "PPG" in str(e):
                 log.log_status(WindowStatus.POOR_PPG_QUALITY)
+            elif "BM" in str(e):
+                log.log_status(WindowStatus.BM_FAILED)
             else:
+                print(f"Unexpected assert failure: {e}")
                 log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
-            # # Debug plot
-            # plot_waveforms(ecg, ppg, abp, show=True)
-
         except Exception as e:
-            print(f"Unexpected failure {e}")
+            print(f"Unexpected failure: {e}")
             log.log_status(WindowStatus.UNEXPECTED_FAILURE)
 
         if early_stop and i >= early_stop:
             break
 
-    log.save()
+    log.log_pickle(hists, "histograms")
+    log.save_log()
 
     print(f"Finished processing device {dev}")
 
 
-def run(local_dataset, window_size, gap_tol, device):
+def run(
+    local_dataset,
+    window_size,
+    gap_tol,
+    device,
+    start_nano=None,
+    end_nano=None,
+    early_stop=None,
+):
     """
     Function to run in parallel
     """
     sdk = AtriumSDK(dataset_location=local_dataset)
 
-    # twentytwo = 1640998861 * (10**9)
-    # twentythree = 1672531200 * (10**9)
-
-    itr = make_device_itr_all_signals(
+    itr = make_device_itr_ecg_ppg(
         sdk,
         window_size,
         gap_tol,
         device=device,
-        pid=None,
-        prefetch=50,
+        prefetch=10,
+        cache=10,
         shuffle=False,
-        start=None,
-        end=None,
+        start_nano=start_nano,
+        end_nano=end_nano,
     )
-    process_pat(sdk, device, itr)
+    save_pats(sdk, device, itr, early_stop=early_stop)
 
     return True
 
 
 if __name__ == "__main__":
 
-    # Newest dataset with Philips measures (SBP, DBP, MAP) (incomplete, 90%)
-    # local_dataset = "/mnt/datasets/ian_dataset_2024_07_22"
-
     # Newest dataset
+    # local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
     local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
 
     sdk = AtriumSDK(dataset_location=local_dataset)
-    print_all_measures(sdk)
+    # print_all_measures(sdk)
 
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 5 * 60 * 60  # 30 min
-    gap_tol = 30 * 60  # 30 min to reduce overlapping windows with gap tol
+    window_size = 1 * 60 * 60
+    gap_tol = 5 * 60
 
-    itr = make_device_itr_all_signals(sdk, window_size, gap_tol, 80, shuffle=False)
-    process_pat(sdk, 80, itr, early_stop=500)
-    exit()
+    start = None
+    end = datetime(year=2022, month=5, day=1).timestamp() * (10**9)
 
-    num_cores = 15  # len(devices)
+    early_stop = None
+    # start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
+    # end = None
+    # run(local_dataset, window_size, gap_tol, 80, start, end)
+    # exit()
+
+    num_cores = 15
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {
-            pp.submit(run, local_dataset, window_size, gap_tol, d): d for d in devices
+            pp.submit(
+                run, local_dataset, window_size, gap_tol, d, start, end, early_stop
+            ): d
+            for d in devices
         }
 
         for f in concurrent.futures.as_completed(futures):

@@ -1,11 +1,12 @@
 import warnings
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from beat_matching import beat_matching, correct_pats
 from kf_sawtooth import calc_sawtooth
 from peak_extract import ppg_peak_detect, rpeak_detect_fast
+from pyhrv.nonlinear import poincare
+from utils.logger import WindowStatus
 
 
 def calculate_pat(ecg, ecg_freq, ppg, ppg_freq, log):
@@ -21,10 +22,13 @@ def calculate_pat(ecg, ecg_freq, ppg, ppg_freq, log):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         ecg_peak_times = rpeak_detect_fast(ecg["times"], ecg["values"], ecg_freq)
-        ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
+        ppg_peak_times = ppg_peak_detect(ppg["times"], ppg["values"], ppg_freq)
 
     assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
     assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
+
+    # ecg_sd1, ecg_sd2, _, _ = poincare(rpeaks=ecg_peak_times, show=False, mode="dev")
+    # ppg_sd1, ppg_sd2, _, _ = poincare(rpeaks=ppg_peak_times, show=False, mode="dev")
 
     #### Beat Matching ####
     ssize = 6
@@ -48,9 +52,6 @@ def calculate_pat(ecg, ecg_freq, ppg, ppg_freq, log):
     pats["confidence"] = [m.confidence for m in matching_beats]
     pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
     pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
-    pats["age_days"] = pats["times"].apply(
-        lambda x: (datetime.fromtimestamp(x) - dob).days
-    )
 
     #### Correct Mismatched Beats ####
     correct_pats(pats, matching_beats, pat_range=0.100)
@@ -59,11 +60,5 @@ def calculate_pat(ecg, ecg_freq, ppg, ppg_freq, log):
     #### Sawtooth Correction ####
     st1, st2, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"])
 
-    st1["age_days"] = st1["times"].apply(
-        lambda x: (datetime.fromtimestamp(x) - dob).days
-    )
-    st2["age_days"] = st2["times"].apply(
-        lambda x: (datetime.fromtimestamp(x) - dob).days
-    )
-
-    return pats, st1, st2
+    return pats, st1, st2, ecg_peak_times, ppg_peak_times
+    # return pats, st1, st2, ecg_sd1, ecg_sd2, ppg_sd1, ppg_sd2

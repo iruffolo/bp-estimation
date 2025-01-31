@@ -2,7 +2,7 @@ import heartpy as hp
 import neurokit2 as nk
 import numpy as np
 from biosppy.signals import abp, ecg
-from biosppy.signals.ppg import find_onsets_kavsaoglu2016
+from biosppy.signals.ppg import find_onsets_elgendi2013, find_onsets_kavsaoglu2016, ppg
 
 
 def ppg_peak_detect(signal_times, signal_values, freq_hz):
@@ -20,10 +20,14 @@ def ppg_peak_detect(signal_times, signal_values, freq_hz):
     # cutoff=40, order=2, filtertype='lowpass')
     # working_data, measures = hp.process(signal_values, sample_rate=freq_hz)
 
+    # x = ppg(signal=signal_values, sampling_rate=freq_hz, show=False)
+
     onsets = find_onsets_kavsaoglu2016(
         signal=signal_values,
         sampling_rate=freq_hz,
-        init_bpm=90,
+        # alpha=0.9,
+        k=4,
+        init_bpm=120,
         min_delay=0.2,
         max_BPM=247,
     )[0]

@@ -98,28 +98,63 @@ class SavePats:
         path="../data/debug_plots/valid/",
     ):
 
-        fig, ax = plt.subplots(6, 1, figsize=(15, 10))
+        fig, ax = plt.subplots(3, 1, figsize=(25, 20))
 
         bm = pats[pats["valid_correction"] > 0]
+        bm = pats
 
-        ax[0].plot(ecg["times"], ecg["values"])
-        ax[0].set_title("ECG")
-        ax[1].plot(ppg["times"], ppg["values"])
-        ax[1].set_title("PPG")
+        # ax[0].plot(ecg["times"], ecg["values"])
+        # ax[0].set_title("ECG")
+        # ax[1].plot(ppg["times"], ppg["values"])
+        # ax[1].set_title("PPG")
 
-        ax[2].scatter(ecg_peak_times[:-1], np.diff(ecg_peak_times), marker="x")
-        ax[2].set_ylim((0, 2))
-        ax[2].set_title("ECG IBIs")
-        ax[3].scatter(ppg_peak_times[:-1], np.diff(ppg_peak_times), marker="x")
-        ax[3].set_ylim((0, 2))
-        ax[3].set_title("PPG IBI")
+        ecg_ibi = np.diff(ecg_peak_times) * 1000
+        ecg_ibi_diff = np.diff(np.diff(ecg_peak_times)) * 1000
+        ppg_ibi = np.diff(ppg_peak_times) * 1000
+        ppg_ibi_diff = np.diff(np.diff(ppg_peak_times)) * 1000
 
-        ax[4].scatter(bm["times"], bm["bm_pat"])
-        ax[4].set_ylim((0, 2))
-        ax[4].set_title("Beat Matching")
-        ax[5].scatter(bm["times"], bm["corrected_bm_pat"], marker="x")
-        ax[5].set_ylim((0, 2))
-        ax[5].set_title("Beat Matching w/ Correction")
+        ax[0].scatter(ecg_peak_times[:-1], ecg_ibi, marker=".", alpha=0.8, label="ECG")
+        ax[0].set_ylim((0, 1000))
+        ax[0].set_title("ECG and PPG IBIs")
+
+        ax[0].scatter(ppg_peak_times[:-1], ppg_ibi, marker=".", alpha=0.8, label="PPG")
+        # ax[1].set_ylim((0, 1000))
+        # ax[1].set_title("PPG IBI")
+        ax[0].legend(loc="upper right")
+
+        ax[1].scatter(
+            ecg_peak_times[:-2], ecg_ibi_diff, marker=".", s=20, alpha=0.5, label="ECG"
+        )
+        ax[1].scatter(
+            ppg_peak_times[:-2], ppg_ibi_diff, marker=".", s=20, alpha=0.5, label="PPG"
+        )
+        ax[1].set_ylim((-50, 50))
+        ax[1].set_title("Delta PPG & ECG IBI")
+        ax[1].set_yticks(np.linspace(-50, 50, 11))
+        ax[1].legend(loc="upper right")
+
+        ax[2].scatter(bm["times"], bm["bm_pat"], marker=".", s=5)
+        ax[2].set_title("Beat Matching")
+        ax[2].scatter(bm["times"], bm["corrected_bm_pat"], marker=".", s=5, alpha=0.2)
+        ax[2].set_title("Beat Matching w/ Correction")
+        ax[2].set_ylim((0, 4))
+
+        plt.grid(visible=True, which="both")
 
         plt.tight_layout()
-        plt.savefig(path + f"{self.device}_{self.windows}.png")
+        # plt.show(g
+        # plt.savefig(path + f"{self.device}_{self.windows}.png")
+        plt.close()
+
+        ecgdf = pd.DataFrame(ecg_ibi_diff)
+        ecgdf.to_csv(path + f"{self.device}_{self.windows}_ecg.csv", index=False)
+        ppgdf = pd.DataFrame(ppg_ibi_diff)
+        ppgdf.to_csv(path + f"{self.device}_{self.windows}_ppg.csv", index=False)
+
+        fig, ax = plt.subplots(1, 2, figsize=(25, 20))
+        ax[0].hist(ecg_ibi_diff, bins=40, range=(-20, 20))
+        ax[0].set_xlabel("ECG IBI (ms)")
+        ax[1].hist(ppg_ibi_diff, bins=200, range=(-100, 100))
+        ax[1].set_xlabel("PPG IBI (ms)")
+        plt.savefig(path + f"{self.device}_{self.windows}_hist.png")
+        plt.close()

@@ -22,7 +22,7 @@ class MatchedPeak:
     possible_pats: list[float] = field(default_factory=list)
 
 
-def get_quality_index(signal, min_hr=20, max_hr=300):
+def get_quality_index(signal, min_hr=50, max_hr=250, max_change=0.25, min_change=0.08):
     """
     Get quality of signal based on the interbeat intervals and change in HR
 
@@ -35,12 +35,21 @@ def get_quality_index(signal, min_hr=20, max_hr=300):
 
     # Get IBI
     ibi = np.diff(signal)
+    ibi_diff = np.diff(ibi)
+
+    # print(f"signal {signal}")
+    # print(f"ibi {ibi}")
+    # print(f"ibi diff {ibi_diff}")
 
     # Convert to HR
     hr = 60 / ibi
 
     # Get quality index
-    hr_quality = (min_hr < hr) & (hr < max_hr)
+    hr_quality = (
+        ((min_hr < hr) & (hr < max_hr))[:-1]
+        & (abs(ibi_diff) < max_change)
+        & (abs(ibi_diff) > min_change)
+    )
 
     return hr_quality
 
@@ -58,7 +67,7 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
     """
 
     # Precalculate quality index for entire PPG signal
-    # ecg_quality = get_quality_index(ecg_peak_times)
+    ecg_quality = get_quality_index(ecg_peak_times)
     ppg_quality = get_quality_index(ppg_peak_times)
 
     matching_beats = list()
@@ -76,9 +85,12 @@ def beat_matching(ecg_peak_times, ppg_peak_times, wsize=20, ssize=6, max_search_
             continue
 
         # Signal quality passed and within idx bounds for search
-        if (idx + wsize + ssize) < ppg_peak_times.size and ppg_quality[
-            idx : idx + wsize + ssize
-        ].all():
+        if (
+            (idx + wsize + ssize)
+            < ppg_peak_times.size
+            # and ppg_quality[idx : idx + wsize + ssize].any()
+            # and ecg_quality[idx : idx + wsize + ssize].any()
+        ):
 
             # Calculate distance for each PPG peak in search window
             euclidean = np.array(

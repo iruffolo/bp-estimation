@@ -36,7 +36,7 @@ def run_device(
         window_size,
         gap_tol,
         device=device,
-        shuffle=True,
+        shuffle=False,
         start_nano=start_nano,
         end_nano=end_nano,
     )
@@ -50,8 +50,11 @@ def run_device(
     )
 
     sp = SavePats(device, log)
+    indices = np.random.permutation(len(itr))
 
-    for i, w in enumerate(itr):
+    for i in indices:
+        w = itr[i]
+        # for i, w in enumerate(itr):
 
         if not w.patient_id:
             log.log_status(WindowStatus.NO_PATIENT_ID)
@@ -66,6 +69,7 @@ def run_device(
 
         print(f"Processing pid: {w.patient_id} dev: {device}, date: {t}, age: {age}d")
 
+        ecg = ppg = None
         # Extract data from window and validate
         for (signal, freq, _), v in w.signals.items():
             # Skip signals without data (ABP, SYS variants)
@@ -90,20 +94,21 @@ def run_device(
             log.log_status(WindowStatus.INCOMPLETE_WINDOW)
             continue
 
-        try:
-            sp.process_window(ecg, ecg_freq, ppg, ppg_freq, dob, w.patient_id)
-        except AssertionError as e:
-            print(f"Signal quality issue: {e}")
-            if "ECG" in str(e):
-                log.log_status(WindowStatus.POOR_ECG_QUALITY)
-            elif "PPG" in str(e):
-                log.log_status(WindowStatus.POOR_PPG_QUALITY)
-            elif "BM" in str(e):
-                log.log_status(WindowStatus.BM_FAILED)
-            else:
-                print(f"Unexpected assert failure: {e}")
-                log.log_status(WindowStatus.UNEXPECTED_FAILURE)
-                raise
+        if ecg and ppg:
+            try:
+                sp.process_window(ecg, ecg_freq, ppg, ppg_freq, dob, w.patient_id)
+            except AssertionError as e:
+                print(f"Signal quality issue: {e}")
+                if "ECG" in str(e):
+                    log.log_status(WindowStatus.POOR_ECG_QUALITY)
+                elif "PPG" in str(e):
+                    log.log_status(WindowStatus.POOR_PPG_QUALITY)
+                elif "BM" in str(e):
+                    log.log_status(WindowStatus.BM_FAILED)
+                else:
+                    print(f"Unexpected assert failure: {e}")
+                    log.log_status(WindowStatus.UNEXPECTED_FAILURE)
+                    raise
 
         # except Exception as e:
         #     print(f"Unexpected failure: {e}")
@@ -127,11 +132,12 @@ if __name__ == "__main__":
 
     # Params for run
     num_cores = len(devices)
-    window_size = 1 * 60 * 60
+    window_size = 20 * 60 * 60
     gap_tol = 5 * 60
+    early_stop = None
+
     start = None
     end = datetime(year=2022, month=5, day=1).timestamp() * (10**9)
-    early_stop = None
     # start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
     # end = None
 

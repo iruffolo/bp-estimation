@@ -1,10 +1,12 @@
 import concurrent.futures
 import os
+import warnings
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from atriumdb import AtriumSDK, DatasetDefinition
+from save_pats import SavePats
 from utils.atriumdb_helpers import (
     make_device_itr_all_signals,
     make_device_itr_ecg_ppg,
@@ -13,62 +15,61 @@ from utils.atriumdb_helpers import (
 from utils.logger import Logger, WindowStatus
 
 
-def save_pats(sdk, dev, itr, early_stop=None):
+def run_device(
+    local_dataset,
+    window_size,
+    gap_tol,
+    device,
+    log_path,
+    start_nano=None,
+    end_nano=None,
+    early_stop=None,
+):
     """
-    Processing function for dataset iterator
-
-    :param sdk: AtriumSDK instance
-    :param dev: Device ID
-    :param itr: Dataset iterator
-
-    :return: Dictionary of pulse arrival times for each patient in device
+    Function to run in parallel. Creates an iterator for a device, and passes
+    data back to callback
     """
+    sdk = AtriumSDK(dataset_location=local_dataset)
+
+    itr = make_device_itr_ecg_ppg(
+        sdk,
+        window_size,
+        gap_tol,
+        device=device,
+        shuffle=False,
+        start_nano=start_nano,
+        end_nano=end_nano,
+    )
 
     num_windows = early_stop if early_stop else len(itr)
     log = Logger(
-        dev,
+        device,
         num_windows,
-        path="/home/iruffolo/dev/bp-estimation/data/result_histograms/",
+        path=log_path,
         verbose=True,
     )
 
-    age_bins = np.linspace(0, 7000, 7001)
+    sp = SavePats(device, log)
+    indices = np.random.permutation(len(itr))
 
-    bins = 5000
-    bin_range = (0, 5)
-
-    _, edges = np.histogram([], bins=bins, range=bin_range)
-    hists = {
-        "naive": {
-            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
-        },
-        "bm": {
-            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
-        },
-        "bm_st1": {
-            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
-        },
-        "bm_st1_st2": {
-            age: np.histogram([], bins=bins, range=bin_range)[0] for age in age_bins
-        },
-    }
-
-    for i, w in enumerate(itr):
+    for i in indices:
+        w = itr[i]
+        # for i, w in enumerate(itr):
 
         if not w.patient_id:
             log.log_status(WindowStatus.NO_PATIENT_ID)
             continue
         else:
             # Check patient age
-            info = sdk.get_patient_info(w.patient_id)
+            dob = datetime.fromtimestamp(
+                sdk.get_patient_info(w.patient_id)["dob"] / 10**9
+            )
             t = datetime.fromtimestamp(w.start_time / 10**9)
-            dob = datetime.fromtimestamp(info["dob"] / 10**9)
-            age_at_visit = (t - dob).days
+            age = (t - dob).days
 
-        print(
-            f"Processing patient {w.patient_id} dev {dev}, date: {t}, age: {age_at_visit} days"
-        )
+        print(f"Processing pid: {w.patient_id} dev: {device}, date: {t}, age: {age}d")
 
+        ecg = ppg = None
         # Extract data from window and validate
         for (signal, freq, _), v in w.signals.items():
             # Skip signals without data (ABP, SYS variants)
@@ -93,144 +94,26 @@ def save_pats(sdk, dev, itr, early_stop=None):
             log.log_status(WindowStatus.INCOMPLETE_WINDOW)
             continue
 
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                ecg_peak_times = rpeak_detect_fast(
-                    ecg["times"], ecg["values"], ecg_freq
-                )
-                ppg_peak_times = peak_detect(ppg["times"], ppg["values"], ppg_freq)
+        if ecg and ppg:
+            try:
+                sp.process_window(ecg, ecg_freq, ppg, ppg_freq, dob, w.patient_id)
+            except AssertionError as e:
+                print(f"Signal quality issue: {e}")
+                if "ECG" in str(e):
+                    log.log_status(WindowStatus.POOR_ECG_QUALITY)
+                elif "PPG" in str(e):
+                    log.log_status(WindowStatus.POOR_PPG_QUALITY)
+                elif "BM" in str(e):
+                    log.log_status(WindowStatus.BM_FAILED)
+                else:
+                    print(f"Unexpected assert failure: {e}")
+                    log.log_status(WindowStatus.UNEXPECTED_FAILURE)
+                    raise
 
-            date = datetime.fromtimestamp(ecg["times"][0])
-
-            assert ecg_peak_times.size > 500, "Not enough ECG peaks found"
-            assert ppg_peak_times.size > 500, "Not enough PPG peaks found"
-
-            ssize = 6
-            matching_beats = beat_matching(ecg_peak_times, ppg_peak_times, ssize=ssize)
-            assert len(matching_beats) > 0, "BM failed to find any matching beats"
-
-            log.log_status(WindowStatus.TOTAL_BEATS, len(ecg_peak_times))
-            log.log_status(
-                WindowStatus.TOTAL_BEATS_DROPPED,
-                len(ecg_peak_times) - len(matching_beats),
-            )
-
-            # Create a df for all possible PAT values
-            all_pats = pd.DataFrame(
-                [m.possible_pats for m in matching_beats],
-                columns=[f"{i + 1} beats" for i in range(ssize)],
-            )
-            all_pats["bm_pat"] = [m.possible_pats[m.n_peaks] for m in matching_beats]
-            all_pats["confidence"] = [m.confidence for m in matching_beats]
-            all_pats["times"] = [ecg_peak_times[m.ecg_peak] for m in matching_beats]
-            all_pats["beats_skipped"] = [m.n_peaks for m in matching_beats]
-            all_pats["age_days"] = all_pats["times"].apply(
-                lambda x: (datetime.fromtimestamp(x) - dob).days
-            )
-
-            correct_pats(all_pats, matching_beats, pat_range=0.100)
-            df = all_pats[all_pats["valid_correction"] > 0]
-
-            fn = f"{w.patient_id}_{dev}_{i}"
-            cdata, p1, p2 = calc_sawtooth(df["times"], df["corrected_bm_pat"], fn)
-
-            st1 = pd.DataFrame(cdata["st1"])
-            st2 = pd.DataFrame(cdata["st2"])
-
-            st1["age_days"] = st1["times"].apply(
-                lambda x: (datetime.fromtimestamp(x) - dob).days
-            )
-            st2["age_days"] = st2["times"].apply(
-                lambda x: (datetime.fromtimestamp(x) - dob).days
-            )
-
-            for day in all_pats["age_days"][all_pats["age_days"] <= 7000].unique():
-                naive = np.histogram(
-                    all_pats["1 beats"][all_pats["age_days"] == day],
-                    bins=bins,
-                    range=bin_range,
-                )[0]
-                hists["naive"][day] += naive
-
-                bm = np.histogram(
-                    df["corrected_bm_pat"][df["age_days"] == day],
-                    bins=bins,
-                    range=bin_range,
-                )[0]
-                hists["bm"][day] += bm
-
-                bm_st1 = np.histogram(
-                    st1["values"][st1["age_days"] == day],
-                    bins=bins,
-                    range=bin_range,
-                )[0]
-                hists["bm_st1"][day] += bm_st1
-
-                bm_st1_st2 = np.histogram(
-                    st2["values"][st2["age_days"] == day],
-                    bins=bins,
-                    range=bin_range,
-                )[0]
-                hists["bm_st1_st2"][day] += bm_st1_st2
-
-            log.log_raw_data(p1, f"st1_params")
-            log.log_raw_data(p2, f"st2_params")
-
-            log.log_status(WindowStatus.SUCCESS)
-
-        # Peak detection faliled to detect enough peaks in calculate_pat
-        except AssertionError as e:
-            print(f"Signal quality issue: {e}")
-            if "ECG" in str(e):
-                log.log_status(WindowStatus.POOR_ECG_QUALITY)
-            elif "PPG" in str(e):
-                log.log_status(WindowStatus.POOR_PPG_QUALITY)
-            elif "BM" in str(e):
-                log.log_status(WindowStatus.BM_FAILED)
-            else:
-                print(f"Unexpected assert failure: {e}")
-                log.log_status(WindowStatus.UNEXPECTED_FAILURE)
-
-        except Exception as e:
-            print(f"Unexpected failure: {e}")
-            log.log_status(WindowStatus.UNEXPECTED_FAILURE)
-
-        if early_stop and i >= early_stop:
-            break
-
-    log.log_pickle(hists, "histograms")
-    log.save_log()
-
-    print(f"Finished processing device {dev}")
-
-
-def run(
-    local_dataset,
-    window_size,
-    gap_tol,
-    device,
-    start_nano=None,
-    end_nano=None,
-    early_stop=None,
-):
-    """
-    Function to run in parallel
-    """
-    sdk = AtriumSDK(dataset_location=local_dataset)
-
-    itr = make_device_itr_ecg_ppg(
-        sdk,
-        window_size,
-        gap_tol,
-        device=device,
-        prefetch=10,
-        cache=10,
-        shuffle=False,
-        start_nano=start_nano,
-        end_nano=end_nano,
-    )
-    save_pats(sdk, device, itr, early_stop=early_stop)
+        # except Exception as e:
+        #     print(f"Unexpected failure: {e}")
+        #     log.log_status(WindowStatus.UNEXPECTED_FAILURE)
+        #     raise
 
     return True
 
@@ -240,32 +123,40 @@ if __name__ == "__main__":
     # Newest dataset
     # local_dataset = "/home/ian/dev/datasets/ian_dataset_2024_08_26"
     local_dataset = "/mnt/datasets/ian_dataset_2024_08_26"
-
     sdk = AtriumSDK(dataset_location=local_dataset)
-    # print_all_measures(sdk)
+
+    log_path = "/home/iruffolo/dev/bp-estimation/data/result_histograms/"
 
     devices = list(sdk.get_all_devices().keys())
     print(f"Devices: {devices}")
 
-    window_size = 1 * 60 * 60
+    # Params for run
+    num_cores = len(devices)
+    window_size = 20 * 60 * 60
     gap_tol = 5 * 60
+    early_stop = None
 
     start = None
     end = datetime(year=2022, month=5, day=1).timestamp() * (10**9)
-
-    early_stop = None
     # start = datetime(year=2022, month=8, day=1).timestamp() * (10**9)
     # end = None
-    # run(local_dataset, window_size, gap_tol, 80, start, end)
-    # exit()
 
-    num_cores = 15
+    # run_device(local_dataset, window_size, gap_tol, 80, log_path, start, end)
+    # exit()
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as pp:
 
         futures = {
             pp.submit(
-                run, local_dataset, window_size, gap_tol, d, start, end, early_stop
+                run_device,
+                local_dataset,
+                window_size,
+                gap_tol,
+                d,
+                log_path,
+                start,
+                end,
+                early_stop,
             ): d
             for d in devices
         }
